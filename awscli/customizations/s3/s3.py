@@ -7,12 +7,12 @@ import awscli
 from awscli import EnvironmentVariables
 from awscli.argparser import CLIArgParser, ServiceArgParser, OperationArgParser
 from awscli.help import HelpCommand, ServiceHelpCommand
-from awscli.customizations.S3Plugin.comparator import Comparator
-from awscli.customizations.S3Plugin.fileformat import FileFormat
-from awscli.customizations.S3Plugin.filegenerator import find_bucket_key, \
+from awscli.customizations.s3.comparator import Comparator
+from awscli.customizations.s3.fileformat import FileFormat
+from awscli.customizations.s3.filegenerator import find_bucket_key, \
     FileInfo, FileGenerator
-from awscli.customizations.S3Plugin.filters import Filter
-from awscli.customizations.S3Plugin.s3handler import S3Handler, \
+from awscli.customizations.s3.filters import Filter
+from awscli.customizations.s3.s3handler import S3Handler, \
     print_operation, check_error
 from bcdoc.clidocs import CLIDocumentEventHandler
 import bcdoc.clidocevents

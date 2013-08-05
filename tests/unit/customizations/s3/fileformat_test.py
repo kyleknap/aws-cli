@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from awscli.customizations.S3Plugin.fileformat import FileFormat
+from awscli.customizations.s3.fileformat import FileFormat
 
 
 class FileFormatTest(unittest.TestCase):

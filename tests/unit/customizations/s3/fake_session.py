@@ -6,7 +6,7 @@ import sys
 
 from mock import MagicMock
 
-from awscli.customizations.S3Plugin.filegenerator import find_bucket_key
+from awscli.customizations.s3.filegenerator import find_bucket_key
 
 
 class FakeSession(object):

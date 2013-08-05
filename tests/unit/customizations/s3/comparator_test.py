@@ -1,8 +1,8 @@
 import datetime
 import unittest
 
-from awscli.customizations.S3Plugin.comparator import Comparator
-from awscli.customizations.S3Plugin.filegenerator import FileInfo
+from awscli.customizations.s3.comparator import Comparator
+from awscli.customizations.s3.filegenerator import FileInfo
 
 
 class ComparatorTest(unittest.TestCase):

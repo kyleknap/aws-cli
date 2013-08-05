@@ -8,10 +8,10 @@ import sys
 import botocore.session
 
 from awscli import EnvironmentVariables
-from awscli.customizations.S3Plugin.s3handler import S3Handler
-from awscli.customizations.S3Plugin.filegenerator import FileInfo
-from test_filegenerator import make_loc_files, clean_loc_files, \
-    make_s3_files, s3_cleanup, create_bucket
+from awscli.customizations.s3.s3handler import S3Handler
+from awscli.customizations.s3.filegenerator import FileInfo
+from tests.integration.customizations.s3.test_filegenerator import \
+    make_loc_files, clean_loc_files, make_s3_files, s3_cleanup, create_bucket
 
 if sys.version_info[:2] == (2, 6):
     import unittest2 as unittest
@@ -289,11 +289,13 @@ class S3HandlerTestBucket(unittest.TestCase):
 
         file_info = FileInfo(src=self.bucket, operation='make_bucket', size=0)
         self.s3_handler.call([file_info])
+        print("made it past")
         number_buckets = len(list_buckets())
         self.assertEqual(orig_number_buckets + 1, number_buckets)
 
         file_info = FileInfo(src=self.bucket, operation='remove_bucket',
                              size=0)
+        s3_handler = S3Handler(self.session)
         self.s3_handler.call([file_info])
         number_buckets = len(list_buckets())
         self.assertEqual(orig_number_buckets, number_buckets)

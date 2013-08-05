@@ -20,7 +20,7 @@ from dateutil.parser import parse
 from dateutil.tz import tzlocal
 
 from awscli import EnvironmentVariables
-from awscli.customizations.S3Plugin.filegenerator import find_bucket_key
+from awscli.customizations.s3.filegenerator import find_bucket_key
 
 LOGGER = logging.getLogger('awscli')
 
@@ -169,6 +169,8 @@ class S3Handler(object):
 
     def call(self, files):
         LOGGER.debug('Entered S3Handler class')
+        self.done.clear()
+        self.interrupt.clear()
         current_time = time.time()
 
         try:
@@ -262,6 +264,7 @@ class S3HandlerThread(threading.Thread):
                 except Exception as e:
                     fail = 1
                     error = str(e)
+                    #print(error)
                 try:
                     if filename.operation != 'list_objects' and not retry:
                         print_op = print_operation(filename, fail,

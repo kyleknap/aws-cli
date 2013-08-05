@@ -24,7 +24,7 @@ from awscli.customizations.ec2addcount import ec2_add_count
 from awscli.customizations.paginate import unify_paging_params
 from awscli.customizations.ec2decryptpassword import ec2_add_priv_launch_key
 from awscli.customizations.ec2secgroupsimplify import register_secgroup
-from awscli.customizations.S3Plugin.s3 import s3_plugin_initialize
+from awscli.customizations.s3.s3 import s3_plugin_initialize
 
 
 def awscli_initialize(event_handlers):

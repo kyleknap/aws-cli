@@ -4,8 +4,8 @@ import unittest
 
 from awscli import EnvironmentVariables
 import botocore.session
-from fake_session import FakeSession
-from awscli.customizations.S3Plugin.filegenerator import FileInfo, \
+from tests.unit.customizations.s3.fake_session import FakeSession
+from awscli.customizations.s3.filegenerator import FileInfo, \
     FileGenerator, get_file_stat, find_bucket_key
 
 

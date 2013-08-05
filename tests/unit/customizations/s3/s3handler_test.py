@@ -10,11 +10,11 @@ else:
     import unittest
 
 from awscli import EnvironmentVariables
-from fake_session import FakeSession
-from filegenerator_test import make_loc_files, clean_loc_files, \
-    make_s3_files, s3_cleanup, create_bucket
-from awscli.customizations.S3Plugin.s3handler import S3Handler
-from awscli.customizations.S3Plugin.filegenerator import FileInfo
+from tests.unit.customizations.s3.fake_session import FakeSession
+from tests.unit.customizations.s3.filegenerator_test import \
+    make_loc_files, clean_loc_files, make_s3_files, s3_cleanup, create_bucket
+from awscli.customizations.s3.s3handler import S3Handler
+from awscli.customizations.s3.filegenerator import FileInfo
 
 
 def list_contents(bucket, session):

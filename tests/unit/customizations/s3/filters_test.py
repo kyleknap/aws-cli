@@ -1,8 +1,8 @@
 import os
 import unittest
 
-from awscli.customizations.S3Plugin.filegenerator import FileInfo
-from awscli.customizations.S3Plugin.filters import Filter
+from awscli.customizations.s3.filegenerator import FileInfo
+from awscli.customizations.s3.filters import Filter
 
 
 class FiltersTest(unittest.TestCase):

@@ -1,97 +1,27 @@
-import argparse
 import os
+import argparse
+import awscli
 import sys
+import botocore.session
+
+from mock import Mock, MagicMock
+from awscli.customizations.s3.s3 import AppendFilter, cmd_dict, \
+    params_dict, awscli_initialize, add_s3, add_commands, add_cmd_params, \
+    S3, S3Command, S3Parameter, CommandArchitecture, CommandParameters
+from tests.integration.customizations.s3.test_filegenerator import \
+    make_loc_files, clean_loc_files, make_s3_files, s3_cleanup, create_bucket
+
 if sys.version_info[:2] == (2, 6):
     import unittest2 as unittest
 else:
     import unittest
 
-import awscli
-import botocore.session
-from mock import Mock, MagicMock
-
-from awscli.customizations.S3Plugin.s3 import AppendFilter, cmd_dict, \
-    params_dict, awscli_initialize, add_s3, add_commands, add_cmd_params, \
-    S3, S3Command, S3Parameter, CommandArchitecture, CommandParameters
-from filegenerator_test import make_loc_files, clean_loc_files, \
-    make_s3_files, s3_cleanup, create_bucket
-from fake_session import FakeSession
-
-
-class AppendFilterTest(unittest.TestCase):
-    """
-    This ensures that the custom action produces the correct format
-    for the namespace variable
-    """
-    def test_call(self):
-        parser = argparse.ArgumentParser()
-
-        parser.add_argument('--include', action=AppendFilter, nargs=1,
-                            dest='path')
-        parser.add_argument('--exclude', action=AppendFilter, nargs=1,
-                            dest='path')
-        parsed_args = parser.parse_args(['--include', 'a', '--exclude', 'b'])
-        self.assertEqual(parsed_args.path, [['--include', 'a'],
-                                            ['--exclude', 'b']])
-
-
-class AWSInitializeTest(unittest.TestCase):
-    """
-    This test ensures that all events are correctly registered such that
-    all of the commands can be run.
-    """
-    def setUp(self):
-        self.cli = Mock()
-
-    def test_initialize(self):
-        awscli_initialize(self.cli)
-        reference = []
-        reference.append("building-command-table.main")
-        reference.append("building-operation-table.s3")
-        reference.append("doc-examples.S3.*")
-        cmds = ['mv', 'rm', 'ls', 'rb', 'get', 'put', 'mb', 'copy', 'sync']
-        for cmd in cmds:
-            reference.append("building-parameter-table.s3."+cmd)
-        for arg in self.cli.register.call_args_list:
-            self.assertIn(arg[0][0], reference)
-
-
-class CreateTablesTest(unittest.TestCase):
-    def test_s3(self):
-        """
-        Ensures that the table for the service was created properly
-        """
-        self.services = {}
-        add_s3(self.services, True)
-        for service in self.services.keys():
-            self.assertIn(service, ['s3'])
-
-    def test_command(self):
-        """
-        Ensures that all of the commands generated in the table
-        are elgible commands
-        """
-        self.commands = {}
-        commands_list = ['put', 'get', 'copy', 'mv', 'rm',
-                         'sync', 'ls', 'mb', 'rb']
-        add_commands(self.commands, True)
-        for command in self.commands.keys():
-            self.assertIn(command, commands_list)
-
-    def test_parameters(self):
-        """
-        Ensures that all of the parameters generated for a specified
-        command are an elgible parameter
-        """
-        commands_list = ['put', 'get', 'copy', 'mv', 'rm',
-                         'sync', 'ls', 'mb', 'rb']
-        params_list = ['dryrun', 'delete', 'quiet', 'recursive', 'exclude',
-                       'include', 'acl', 'force']
-        for cmd in commands_list:
-            self.parameters = {}
-            add_cmd_params(self.parameters, cmd)
-            for param in self.parameters.keys():
-                self.assertIn(param, params_list)
+"""
+Note that all of these functions can be found in the unit tests.
+The only difference is that these tests use botocore's actual session
+variables to communicate with s3 as these are integration tests.  Therefore,
+only tests that use sessions are included as integration tests.
+"""
 
 
 class S3Test(unittest.TestCase):
@@ -122,12 +52,6 @@ class S3CommandTest(unittest.TestCase):
         s3_command = S3Command('ls', session, 1)
         s3_command(['s3://'], [])
 
-    def test_call_error(self):
-        session = botocore.session.get_session()
-        s3_command = S3Command('ls', session, 1)
-        with self.assertRaises(Exception):
-            s3_command(['s3://', '--sfdf'], [])
-
     def test_help(self):
         session = botocore.session.get_session()
         s3_command = S3Command('ls', session, 1)
@@ -135,29 +59,15 @@ class S3CommandTest(unittest.TestCase):
             s3_command(['help'], [])
 
 
-class S3ParameterTest(unittest.TestCase):
-    """
-    Tests the ability to put parameters along with options into
-    a parser using the S3Parameter class
-    """
-    def test_add_to_parser(self):
-        s3_param = S3Parameter('test',
-                               {'action': 'store_true', 'dest': 'destination'})
-        parser = argparse.ArgumentParser()
-        s3_param.add_to_parser(parser)
-        parsed_args = parser.parse_args(['--test'])
-        self.assertEqual(parsed_args.destination, True)
-
-
 class CommandArchitectureTest(unittest.TestCase):
     def setUp(self):
-        self.session = FakeSession()
-        self.bucket = make_s3_files(self.session)
+        self.session = botocore.session.get_session()
+        self.bucket = make_s3_files()
         self.loc_files = make_loc_files()
 
     def tearDown(self):
         clean_loc_files(self.loc_files)
-        s3_cleanup(self.bucket, self.session)
+        s3_cleanup(self.bucket)
 
     def test_create_instructions(self):
         """
@@ -183,7 +93,7 @@ class CommandArchitectureTest(unittest.TestCase):
             cmd_arc.create_instructions()
             self.assertEqual(cmd_arc.instructions, instructions[cmd])
 
-        # Test if there is a filter
+        #test if there is a filter
         cmd_arc = CommandArchitecture(self.session, 'put', params)
         cmd_arc.create_instructions()
         self.assertEqual(cmd_arc.instructions, ['file_generator', 'filters',
@@ -237,15 +147,15 @@ class CommandArchitectureTest(unittest.TestCase):
 
 class CommandParametersTest(unittest.TestCase):
     def setUp(self):
-        self.session = FakeSession()
+        self.session = botocore.session.get_session()
         self.mock = MagicMock()
         self.mock.get_config = MagicMock(return_value={'region': None})
         self.loc_files = make_loc_files()
-        self.bucket = make_s3_files(self.session)
+        self.bucket = make_s3_files()
 
     def tearDown(self):
         clean_loc_files(self.loc_files)
-        s3_cleanup(self.bucket, self.session)
+        s3_cleanup(self.bucket)
 
     def test_add_paths(self):
         """
@@ -331,7 +241,7 @@ class CommandParametersTest(unittest.TestCase):
                                                 True),
                  ([s3_prefix], True, False), ([fake_s3_prefix], True, True),
                  ([local_dir], True, False), ([local_file], True, True),
-                 ([local_dir], False, True), ([s3_file+'dag'], False, True)]
+                 ([local_dir], False, True)]
 
         parameters = {}
         for filename in files:

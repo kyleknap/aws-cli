@@ -4,7 +4,7 @@ import random
 
 import botocore.session
 from awscli import EnvironmentVariables
-from awscli.customizations.S3Plugin.filegenerator import FileInfo, \
+from awscli.customizations.s3.filegenerator import FileInfo, \
     FileGenerator, get_file_stat
 
 """
