@@ -137,7 +137,7 @@ def compare_files(self, result_file, ref_file):
 
 class FindBucketKey(unittest.TestCase):
     """
-    This test ensures the find_bucket_key function works when 
+    This test ensures the find_bucket_key function works when
     unicode is used
     """
     def test_unicode(self):

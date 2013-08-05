@@ -264,7 +264,6 @@ class S3HandlerThread(threading.Thread):
                 except Exception as e:
                     fail = 1
                     error = str(e)
-                    #print(error)
                 try:
                     if filename.operation != 'list_objects' and not retry:
                         print_op = print_operation(filename, fail,

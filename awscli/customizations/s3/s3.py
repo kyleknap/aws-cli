@@ -194,8 +194,8 @@ def add_s3_examples(help_command, **kwargs):
     doc_path = os.path.join(
         os.path.dirname(
             os.path.dirname(
-                os.path.abspath(awscli.__file__))), 'doc', 'source', 
-                    'examples', 's3')
+                os.path.abspath(awscli.__file__))), 'doc', 'source',
+                                                    'examples', 's3')
     file_name = 's3-%s.rst' % help_command.obj._name
     doc_path = os.path.join(doc_path, file_name)
     if os.path.isfile(doc_path):
@@ -224,8 +224,8 @@ class S3DocumentEventHandler(CLIDocumentEventHandler):
             doc_path = os.path.join(
                 os.path.dirname(
                     os.path.dirname(
-                        os.path.abspath(awscli.__file__))),
-                            'doc', 'source', 'tutorial', 's3')
+                        os.path.abspath(awscli.__file__))), 'doc', 'source',
+                                                            'tutorial', 's3')
             doc_path = os.path.join(doc_path, 'concepts.rst')
             if os.path.isfile(doc_path):
                 help_command.doc.style.h2('Important Concepts')
