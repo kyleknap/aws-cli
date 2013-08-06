@@ -10,7 +10,6 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
-import unittest
 import os
 import datetime
 import threading
@@ -301,13 +300,11 @@ class S3HandlerTestBucket(unittest.TestCase):
 
         file_info = FileInfo(src=self.bucket, operation='make_bucket', size=0)
         self.s3_handler.call([file_info])
-        print("made it past")
         number_buckets = len(list_buckets())
         self.assertEqual(orig_number_buckets + 1, number_buckets)
 
         file_info = FileInfo(src=self.bucket, operation='remove_bucket',
                              size=0)
-        s3_handler = S3Handler(self.session)
         self.s3_handler.call([file_info])
         number_buckets = len(list_buckets())
         self.assertEqual(orig_number_buckets, number_buckets)

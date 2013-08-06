@@ -333,9 +333,9 @@ class S3HandlerThread(threading.Thread):
                 stream_body = StringIO(body)
             else:
                 stream_body = bytearray(body)
-            params = {'endpoint': self.endpoint, 'bucket': bucket,
-                      'key': key,
-                      'body': stream_body}
+            params = {'endpoint': self.endpoint, 'bucket': bucket, 'key': key}
+            if body:
+                params['body'] = stream_body
             if self.parameters['acl']:
                 params['acl'] = self.parameters['acl'][0]
             response_data, http = operate(self.service, 'PutObject', params)
