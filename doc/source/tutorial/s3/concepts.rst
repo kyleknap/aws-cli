@@ -15,6 +15,7 @@ Every command takes one or two positional path arguments.  The first path argume
 Single Local File and S3 Object Operations
 ++++++++++++++++++++++++++++++++++++++++++
 Some commands perform operations only on single files and S3 objects.  The following commands are single file/object operations if no ``--recursive`` flag is provided.
+
     * ``get``
     * ``mv``
     * ``rm``
@@ -28,12 +29,14 @@ The destination is indicated as a local directory, S3 prefix, or S3 bucket if it
 Directory and S3 Prefix Operations
 ++++++++++++++++++++++++++++++++++
 Some commands only perform operations on the contents of a local directory or S3 prefix/bucket.  Adding or omitting a forward slash or back slash to the end of any path argument, depending on its type, does not affect the results of the operation.  The following features will always result in a directory or S3 prefix/bucket operation.
+
     * commands: ``sync``, ``mb``, ``rb``, ``ls``
     * parameters: ``--recursive``
 
 Use of Exclude and Include Filters
 ++++++++++++++++++++++++++++++++++
 Currently, there is no support for the use of UNIX style wildcards in a command's path arguments.  However, most commands have ``--exclude <value>`` and ``--include <value>`` parameters that can achieve the desired result.  These parameters perform pattern matching to either exclude or include a particular file or object.  The following pattern symbols are supported.
+
     * ``*``: Matches everything
     * ``?``: Matches any single character
     * ``[sequence]``: Matches any character in ``sequence``
