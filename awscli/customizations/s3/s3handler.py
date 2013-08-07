@@ -14,48 +14,21 @@ import hashlib
 import logging
 import math
 import os
-try:
-    import Queue
-except ImportError:
-    import queue as Queue
 import requests
 from six import StringIO
+from six.moves import queue as Queue
 import sys
 import threading
 import time
-try:
-    from urllib import quote
-except ImportError:
-    from urllib.parse import quote
 
 from dateutil.parser import parse
 from dateutil.tz import tzlocal
 
 from awscli import EnvironmentVariables
 from awscli.customizations.s3.filegenerator import find_bucket_key
+from botocore.compat import quote
 
-LOGGER = logging.getLogger('awscli')
-
-
-class NoBlockQueue(Queue.Queue):
-    """
-    This queue ensures that joining does not block interrupt signals.
-    It also contains a threading event ``done`` that breaks the
-    while loop if signaled
-    """
-    def __init__(self, done=threading.Event()):
-        Queue.Queue.__init__(self)
-        self.done = done
-
-    def join(self):
-        self.all_tasks_done.acquire()
-        try:
-            while self.unfinished_tasks:
-                if self.done.isSet():
-                    break
-                self.all_tasks_done.wait(1)
-        finally:
-            self.all_tasks_done.release()
+LOGGER = logging.getLogger(__name__)
 
 
 class MD5Error(Exception):
@@ -65,7 +38,28 @@ class MD5Error(Exception):
     pass
 
 
-def print_operation(filename, fail, dryrun=0):
+class NoBlockQueue(Queue.Queue):
+    """
+    This queue ensures that joining does not block interrupt signals.
+    It also contains a threading event ``done`` that breaks the
+    while loop if signaled
+    """
+    def __init__(self, done=None):
+        Queue.Queue.__init__(self)
+        self.done = done
+
+    def join(self):
+        self.all_tasks_done.acquire()
+        try:
+            while self.unfinished_tasks:
+                if self.done and self.done.isSet():
+                    break
+                self.all_tasks_done.wait(1)
+        finally:
+            self.all_tasks_done.release()
+
+
+def print_operation(filename, fail, dryrun=False):
     """
     Helper function used to print out what an operation did and whether
     it failed.
@@ -154,14 +148,20 @@ def operate(service, cmd, kwargs):
     return response_data, http_response
 
 
+MULTI_THRESHOLD = 8*(1024**2)
+CHUNKSIZE = 7*(1024**2)
+NUM_THREADS = 3
+
+
+
 class S3Handler(object):
     """
     This class holds all of the file info objects yielded to it.
     Worker threads take the file info objects and preform the appropriate
     operation.
     """
-    def __init__(self, session, params={}, multi_threshold=8*(1024**2),
-                 chunksize=7*(1024**2)):
+    def __init__(self, session, params={}, multi_threshold=MULTI_THRESHOLD,
+                 chunksize=CHUNKSIZE, num_threads=NUM_THREADS):
         self.session = session
         self.service = self.session.get_service('s3')
         self.done = threading.Event()
@@ -178,6 +178,7 @@ class S3Handler(object):
         self.chunksize = chunksize
         self.printQueue = NoBlockQueue()
         self.thread_list = []
+        self.num_threads = num_threads
 
     def call(self, files):
         LOGGER.debug('Entered S3Handler class')
@@ -186,7 +187,7 @@ class S3Handler(object):
         current_time = time.time()
 
         try:
-            for i in range(3):
+            for i in range(self.num_threads):
                 thread = S3HandlerThread(self.session, self.queue, self.lock,
                                          self.done, self.params,
                                          self.multi_threshold, self.chunksize,
@@ -225,7 +226,6 @@ class S3Handler(object):
         for thread in self.thread_list:
             thread.join()
         total_time = time.time() - current_time
-        #print total_time
 
 
 class S3HandlerThread(threading.Thread):
@@ -486,7 +486,7 @@ class S3HandlerThread(threading.Thread):
         size_uploads = self.multi_chunksize
         num_uploads = int(math.ceil(filename.size/float(size_uploads)))
         thread_list = []
-        for i in range(3):
+        for i in range(NUM_THREADS):
             thread = UploadPartThread(self.session, task_queue,
                                       complete_upload_queue, self.multi_done,
                                       self.parameters['region'],
@@ -538,7 +538,7 @@ class S3HandlerThread(threading.Thread):
         num_uploads = int(filename.size/size_uploads)
         with open(filename.dest, 'wb') as f:
             thread_list = []
-            for i in range(2):
+            for i in range(NUM_THREADS - 1):
                 thread = DownloadPartThread(self.session, task_queue,
                                             write_queue, self.multi_done,
                                             self.parameters['region'],

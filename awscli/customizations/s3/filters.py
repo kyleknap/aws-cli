@@ -18,7 +18,7 @@ class Filter(object):
     """
     This is a universal exclude/include filter
     """
-    def __init__(self, parameters={}):
+    def __init__(self, parameters=None):
         """
         :var self.patterns: A list of patterns. A pattern consits of a list
             whose first member is a string '--exclude' or '--include'.

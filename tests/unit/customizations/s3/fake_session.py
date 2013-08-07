@@ -43,13 +43,11 @@ class FakeSession(object):
                                 'Size': 15,
                                 'LastModified': '2013-07-15T17:03:43.000Z',
                                 'ETag': 'ad35657fshafq4tg46'}}}
-
     :var self.service:  This is a mock serice to emulate botocore's
         session module
 
     :param md5_error: If true, some operations will raise an exception
         signaling the md5's do not match
-
     :param connection_error: If true, some operations will raise an exception
         signalling that there was a connection_error.
     """
@@ -241,7 +239,7 @@ class FakeOperation(object):
                 if end == '':
                     body = body[int(beginning):]
                 else:
-                    body = body[int(beginning):(int(end)+1)]
+                    body = body[int(beginning):(int(end) + 1)]
             mock_response = MagicMock()
             mock_response.read = MagicMock(return_value=body)
             response_data['Body'] = mock_response
@@ -356,4 +354,4 @@ class FakeHttp(object):
     etag's.  So only formatted etag's are included in this class.
     """
     def __init__(self, etag):
-        self.headers = {'ETag': '\''+etag+'\''}
+        self.headers = {'ETag': '\'' + etag + '\''}
