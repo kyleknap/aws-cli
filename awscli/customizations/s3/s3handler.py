@@ -24,7 +24,6 @@ import time
 from dateutil.parser import parse
 from dateutil.tz import tzlocal
 
-from awscli import EnvironmentVariables
 from awscli.customizations.s3.filegenerator import find_bucket_key
 from botocore.compat import quote
 
@@ -386,9 +385,18 @@ class S3HandlerThread(threading.Thread):
 
     def move(self, filename):
         """
-        Implements a move command for s3
+        Implements a move command for s3.
         """
-        self.copy(filename)
+        src = filename.src_type
+        dest = filename.dest_type
+        if src == 'local' and dest == 's3':
+            self.upload(filename)
+        elif src == 's3' and dest == 's3':
+            self.copy(filename)
+        elif src == 's3' and dest == 'local':
+            self.download(filename)
+        else:
+            raise Exception("Invalid path arguments for mv")
         self.delete(filename)
 
     def list_objects(self, filename):
@@ -449,7 +457,7 @@ class S3HandlerThread(threading.Thread):
 
     def make_bucket(self, filename):
         """
-        makes a bucket
+        Makes a bucket.
         """
         bucket, key = find_bucket_key(filename.src)
         region = self.parameters['region']
@@ -461,7 +469,7 @@ class S3HandlerThread(threading.Thread):
 
     def remove_bucket(self, filename):
         """
-        removes a bucket
+        Removes a bucket.
         """
         bucket, key = find_bucket_key(filename.src)
         params = {'endpoint': self.endpoint, 'bucket': bucket}
