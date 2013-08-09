@@ -28,11 +28,12 @@ from awscli.customizations.s3.filegenerator import find_bucket_key
 from botocore.compat import quote
 
 LOGGER = logging.getLogger(__name__)
-MULTI_THRESHOLD = 8*(1024**2)
-CHUNKSIZE = 7*(1024**2)
+MULTI_THRESHOLD = 8 * (1024 ** 2)
+CHUNKSIZE = 7 * (1024 ** 2)
 NUM_THREADS = 3
 NUM_MULTI_THREADS = 3
-
+QUEUE_TIMEOUT_GET = 0.5
+QUEUE_TIMEOUT_WAIT = 1
 
 class MD5Error(Exception):
     """
@@ -45,7 +46,8 @@ class NoBlockQueue(Queue.Queue):
     """
     This queue ensures that joining does not block interrupt signals.
     It also contains a threading event ``interrupt`` that breaks the
-    while loop if signaled
+    while loop if signaled.  The ``interrupt`` event is optional and
+    returns to the original functionality of a queue if not included.
     """
     def __init__(self, interrupt=None):
         Queue.Queue.__init__(self)
@@ -57,7 +59,7 @@ class NoBlockQueue(Queue.Queue):
             while self.unfinished_tasks:
                 if self.interrupt and self.interrupt.isSet():
                     break
-                self.all_tasks_done.wait(1)
+                self.all_tasks_done.wait(QUEUE_TIMEOUT_WAIT)
         finally:
             self.all_tasks_done.release()
 
@@ -256,7 +258,7 @@ class S3HandlerThread(threading.Thread):
                 fail = 0
                 error = ''
                 retry = 0
-                filename = self.queue.get(True, 0.5)
+                filename = self.queue.get(True, QUEUE_TIMEOUT_GET)
                 try:
                     if not self.parameters['dryrun']:
                         getattr(self, filename.operation)(filename)
@@ -598,7 +600,7 @@ class DownloadPartThread(threading.Thread):
     def run(self):
         while True:
             try:
-                part_info = self.queue.get(True, 0.5)
+                part_info = self.queue.get(True, QUEUE_TIMEOUT_GET)
                 filename = part_info[0]
                 part_number = part_info[1]
                 size_uploads = part_info[2]
@@ -656,7 +658,7 @@ class WriteFile(threading.Thread):
     def run(self):
         while True:
             try:
-                write_task = self.queue.get(True, 0.5)
+                write_task = self.queue.get(True, QUEUE_TIMEOUT_GET)
                 part_number = write_task[0]
                 if part_number != 'fail':
                     size_uploads = write_task[1]
@@ -703,7 +705,7 @@ class UploadPartThread(threading.Thread):
     def run(self):
         while True:
             try:
-                part_info = self.queue.get(True, 0.5)
+                part_info = self.queue.get(True, QUEUE_TIMEOUT_GET)
                 try:
                     filename = part_info[0]
                     upload_id = part_info[1]
@@ -772,7 +774,7 @@ class PrintThread(threading.Thread):
     def run(self):
         while True:
             try:
-                print_task = self.printQueue.get(True, 0.5)
+                print_task = self.printQueue.get(True, QUEUE_TIMEOUT_GET)
                 print_str = print_task['result']
                 final_str = ''
                 if print_task.get('part', ''):

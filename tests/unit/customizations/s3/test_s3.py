@@ -4,7 +4,7 @@
 # may not use this file except in compliance with the License. A copy of
 # the License is located at
 #
-#     http://aws.amazon.com/apache2.0/
+#     http://aws.amazon.com/apache2.0e
 #
 # or in the "license" file accompanying this file. This file is
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
@@ -24,7 +24,7 @@ from awscli.customizations.s3.s3 import AppendFilter, cmd_dict, \
     params_dict, awscli_initialize, add_s3, add_commands, add_cmd_params, \
     S3, S3Command, S3Parameter, CommandArchitecture, CommandParameters
 from tests.unit.customizations.s3 import make_loc_files, clean_loc_files, \
-    make_s3_files, s3_cleanup
+    make_s3_files, s3_cleanup, S3HandlerBaseTest
 from tests.unit.customizations.s3.fake_session import FakeSession
 from tests.unit.docs.test_help_output import CapturedRenderer, \
     BaseAWSHelpOutput
@@ -166,8 +166,9 @@ class S3ParameterTest(unittest.TestCase):
         self.assertEqual(parsed_args.destination, True)
 
 
-class CommandArchitectureTest(unittest.TestCase):
+class CommandArchitectureTest(S3HandlerBaseTest):
     def setUp(self):
+        super(CommandArchitectureTest, self).setUp()
         self.session = FakeSession()
         self.bucket = make_s3_files(self.session)
         self.loc_files = make_loc_files()
@@ -176,10 +177,11 @@ class CommandArchitectureTest(unittest.TestCase):
         sys.stdout = self.output
 
     def tearDown(self):
-        clean_loc_files(self.loc_files)
-        s3_cleanup(self.bucket, self.session)
         self.output.close()
         sys.stdout = self.saved_stdout
+        super(CommandArchitectureTest, self).setUp()
+        clean_loc_files(self.loc_files)
+        s3_cleanup(self.bucket, self.session)
 
     def test_create_instructions(self):
         """
