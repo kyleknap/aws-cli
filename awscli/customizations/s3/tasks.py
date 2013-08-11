@@ -108,7 +108,7 @@ class UploadPartTask(object):
     object.
     """
     def __init__(self, session, queue, part_queue, dest_queue,
-                 region, printQueue, interrupt):
+                 region, printQueue, interrupt, part_counter):
         self.session = session
         self.service = self.session.get_service('s3')
         self.endpoint = self.service.get_endpoint(region)
@@ -116,6 +116,7 @@ class UploadPartTask(object):
         self.part_queue = part_queue
         self.dest_queue = dest_queue
         self.printQueue = printQueue
+        self.part_counter = part_counter
 
     def read_part(self, filename, part_number, part_size):
         num_uploads = int(math.ceil(filename.size/float(part_size)))
@@ -131,6 +132,7 @@ class UploadPartTask(object):
     def __call__(self):
         try:
             part_info = self.part_queue.get(True, QUEUE_TIMEOUT_GET)
+            self.part_counter.count += 1
             try:
                 filename = part_info[0]
                 upload_id = part_info[1]
@@ -172,6 +174,7 @@ class UploadPartTask(object):
             except Exception as e:
                 LOGGER.debug('%s' % str(e))
             self.part_queue.task_done()
+            self.part_counter.count -= 1
         except Queue.Empty:
                 pass
 
@@ -185,7 +188,7 @@ class DownloadPartTask(threading.Thread):
     the ``FileInfo`` object.
     """
     def __init__(self, session, queue, part_queue, dest_queue,
-                 f, region, printQueue, write_lock):
+                 f, region, printQueue, write_lock, part_counter):
         self.session = session
         self.service = self.session.get_service('s3')
         self.endpoint = self.service.get_endpoint(region)
@@ -195,10 +198,12 @@ class DownloadPartTask(threading.Thread):
         self.f = f
         self.printQueue = printQueue
         self.write_lock = write_lock
+        self.part_counter = part_counter
 
     def __call__(self):
         try:
             part_info = self.part_queue.get(True, QUEUE_TIMEOUT_GET)
+            self.part_counter.count += 1
             filename = part_info[0]
             part_number = part_info[1]
             size_uploads = part_info[2]
@@ -236,5 +241,6 @@ class DownloadPartTask(threading.Thread):
             except Exception as e:
                 LOGGER.debug('%s' % str(e))
             self.part_queue.task_done()
+            self.part_counter.count -= 1
         except Queue.Empty:
             pass

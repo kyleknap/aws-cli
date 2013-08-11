@@ -4,18 +4,9 @@ import sys
 import threading
 
 from awscli.customizations.s3.tasks import BasicTask
+from awscli.customizations.s3.utils import MultiCounter
 
 LOGGER = logging.getLogger(__name__)
-
-
-class MultiCounter(object):
-    """
-    This class is used as a way to keep track of how many multipart
-    operations are in progress.  If multipart operations are not
-    tracked and limited deadlock can occur.
-    """
-    def __init__(self):
-        self.count = 0
 
 
 class Executer(object):

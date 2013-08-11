@@ -11,7 +11,7 @@ from dateutil.tz import tzlocal
 
 from botocore.compat import quote
 from awscli.customizations.s3.tasks import UploadPartTask, DownloadPartTask
-from awscli.customizations.s3.utils import find_bucket_key, \
+from awscli.customizations.s3.utils import find_bucket_key, MultiCounter, \
     retrieve_http_etag, check_etag, check_error, operate, NoBlockQueue
 
 
@@ -341,6 +341,7 @@ class FileInfo(TaskInfo):
         """
         part_queue = NoBlockQueue(self.interrupt)
         complete_upload_queue = Queue.PriorityQueue()
+        part_counter = MultiCounter()
         bucket, key = find_bucket_key(self.dest)
         params = {'endpoint': self.endpoint, 'bucket': bucket, 'key': key}
         if self.parameters['acl']:
@@ -358,9 +359,17 @@ class FileInfo(TaskInfo):
                                   dest_queue=complete_upload_queue,
                                   region=self.region,
                                   printQueue=self.printQueue,
-                                  interrupt=self.interrupt)
+                                  interrupt=self.interrupt,
+                                  part_counter=part_counter)
             self.queue.put(task)
         part_queue.join()
+        # The following ensures that if the multipart upload is in progress,
+        # all part uploads finish before aborting or completing.  This
+        # really only applies when an interrupt signal is sent because the
+        # ``part_queue.join()`` ensures this if the process is not
+        # interrupted.
+        while part_counter.count:
+            time.sleep(0.1)
         parts_list = []
         while not complete_upload_queue.empty():
             part = complete_upload_queue.get()
@@ -391,6 +400,7 @@ class FileInfo(TaskInfo):
         """
         part_queue = NoBlockQueue(self.interrupt)
         dest_queue = NoBlockQueue(self.interrupt)
+        part_counter = MultiCounter()
         write_lock = threading.Lock()
         d = os.path.dirname(self.dest)
         try:
@@ -410,9 +420,17 @@ class FileInfo(TaskInfo):
                                         dest_queue=dest_queue,
                                         f=f, region=self.region,
                                         printQueue=self.printQueue,
-                                        write_lock=write_lock)
+                                        write_lock=write_lock,
+                                        part_counter=part_counter)
                 self.queue.put(task)
             part_queue.join()
+            # The following ensures that if the multipart download is
+            # in progress, all part uploads finish before releasing the
+            # the file handle.  This really only applies when an interrupt
+            # signal is sent because the ``part_queue.join()`` ensures this
+            # if the process is not interrupted.
+            while part_counter.count:
+                time.sleep(0.1)
         part_list = []
         while not dest_queue.empty():
             part = dest_queue.get()
