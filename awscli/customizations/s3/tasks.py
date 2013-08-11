@@ -52,10 +52,7 @@ class BasicTask(object):
         self.endpoint = self.service.get_endpoint(parameters['region'])
 
         self.filename = filename
-        self.filename.session = self.session
-        self.filename.service = self.service
-        self.filename.endpoint = self.endpoint
-        self.filename.region = parameters['region']
+        self.filename.set_session(self.session, parameters['region'])
         self.filename.parameters = parameters
 
         self.parameters = parameters

@@ -77,11 +77,16 @@ class S3Handler(object):
                     if filename.operation == 'upload':
                         num_uploads = int(math.ceil(filename.size /
                                                     float(self.chunksize)))
-                        self.set_multi(filename)
+                        filename.set_multi(queue=self.queue,
+                                           printQueue=self.printQueue,
+                                           interrupt=self.interrupt,
+                                           chunksize=self.chunksize)
                     elif filename.operation == 'download':
                         num_uploads = int(filename.size/self.chunksize)
-                        filename.is_multi = True
-                        self.set_multi(filename)
+                        filename.set_multi(queue=self.queue,
+                                           printQueue=self.printQueue,
+                                           interrupt=self.interrupt,
+                                           chunksize=self.chunksize)
                 task = BasicTask(session=self.session, filename=filename,
                                  queue=self.queue, done=self.done,
                                  parameters=self.params,
@@ -106,14 +111,3 @@ class S3Handler(object):
         self.done.set()
         self.executer.join()
         total_time = time.time() - current_time
-
-    def set_multi(self, filename):
-        """
-        This is a helper function to inject all of the attributes needed
-        for a ``FileInfo`` to perform a multipart upload or download.
-        """
-        filename.is_multi = True
-        filename.chunksize = self.chunksize
-        filename.interrupt = self.interrupt
-        filename.queue = self.queue
-        filename.printQueue = self.printQueue

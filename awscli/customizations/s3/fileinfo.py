@@ -76,29 +76,45 @@ class TaskInfo(object):
     listing objects/buckets.  This object contains the attributes and
     functions needed to perform the task.  Note that just instantiating one
     of these objects will not be enough to run a listing or bucket command.
-    The ``session``, ``service``, ``endpoint``, and ``region`` need to be
-    assigned as well.  This class is the parent class of the more
-    extensive ``TaskInfo`` object.
+    unless ``session`` and ``region`` are specified upon instantiation.
+    To make it fully operational, ``set_session`` needs to be used.
+    This class is the parent class of the more extensive ``TaskInfo`` object.
 
     :param src: the source path
     :type src: string
     :param src_type: if the source file is s3 or local.
     :type src_type: string
     :param operation: the operation being performed.
-    :param operation: string
+    :type operation: string
+    :param session: ``botocore.session`` object
+    :param region: The region for the endpoint
 
     Note that a local file will always have its absolute path, and a s3 file
     will have its path in the form of bucket/key
     """
-    def __init__(self, src, src_type=None, operation=None):
+    def __init__(self, src, src_type=None, operation=None, session=None,
+                 region=None):
         self.src = src
         self.src_type = src_type
         self.operation = operation
 
-        self.session = None
+        self.session = session
+        self.region = region
         self.service = None
         self.endpoint = None
-        self.region = None
+        if self.session and self.region:
+            self.set_session(self.session, self.region)
+
+    def set_session(self, session, region):
+        """
+        Given a session and region set the service and endpoint.  This enables
+        operations to be performed as ``self.session`` is required to perform
+        an operation.
+        """
+        self.session = session
+        self.region = region
+        self.service = self.session.get_service('s3')
+        self.endpoint = self.service.get_endpoint(self.region)
 
     def list_objects(self):
         """
@@ -181,8 +197,9 @@ class FileInfo(TaskInfo):
     This is a child object of the ``TaskInfo`` object.  It can perform more
     operations such as ``upload``, ``download``, ``copy``, ``delete``,
     ``move``, `multi_upload``, and ``multi_download``.  Similiarly to
-    ``TaskInfo`` objects attributes like ``session`` need to be assigned.
-    Multipart operations need a few more attributes as well.
+    ``TaskInfo`` objects attributes like ``session`` need to be set in order
+    to perform operations. Multipart operations need to run ``set_multi`` in
+    order to be able to run.
     :param dest: the destination path
     :type dest: string
     :param compare_key: the name of the file relative to the specified
@@ -195,26 +212,44 @@ class FileInfo(TaskInfo):
     :type last_update: datetime object
     :param dest_type: if the destination is s3 or local.
     :param dest_type: string
+    :param parameters: a dictionary of important values this is assigned in
+        the ``BasicTask`` object.
     """
     def __init__(self, src, dest=None, compare_key=None, size=None,
                  last_update=None, src_type=None, dest_type=None,
-                 operation=None):
+                 operation=None, session=None, region=None, parameters=None):
         super(FileInfo, self).__init__(src, src_type=src_type,
-                                       operation=operation)
+                                       operation=operation, session=session,
+                                       region=region)
         self.dest = dest
         self.dest_type = dest_type
         self.compare_key = compare_key
         self.size = size
         self.last_update = last_update
-        # Inject ``parameters`` from ``BasicTask`` class.
-        self.parameters = None
+        # Usually inject ``parameters`` from ``BasicTask`` class.
+        if parameters:
+            self.parameters = parameters
+        else:
+            self.parameters = {'acl': None}
 
-        # Required for multipart uploads and downloads.
+        # Required for multipart uploads and downloads.  Use ``set_multi``
+        # function to set these.
         self.queue = None
         self.printQueue = None
         self.is_multi = False
         self.interrupt = None
         self.chunksize = None
+
+    def set_multi(self, queue, printQueue, interrupt, chunksize):
+        """
+        This sets all of the necessary attributes to perform a multipart
+        operation.
+        """
+        self.queue = queue
+        self.printQueue = printQueue
+        self.is_multi = True
+        self.interrupt = interrupt
+        self.chunksize = chunksize
 
     def upload(self):
         """
