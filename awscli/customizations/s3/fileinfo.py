@@ -78,7 +78,7 @@ class TaskInfo(object):
     of these objects will not be enough to run a listing or bucket command.
     unless ``session`` and ``region`` are specified upon instantiation.
     To make it fully operational, ``set_session`` needs to be used.
-    This class is the parent class of the more extensive ``TaskInfo`` object.
+    This class is the parent class of the more extensive ``FileInfo`` object.
 
     :param src: the source path
     :type src: string
