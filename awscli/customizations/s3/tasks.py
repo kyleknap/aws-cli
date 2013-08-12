@@ -45,7 +45,7 @@ class BasicTask(object):
     attributes like ``session`` object in order for the filename to
     perform its designated operation.
     """
-    def __init__(self, session, filename, queue, done, parameters,
+    def __init__(self, session, filename, executer, done, parameters,
                  multi_threshold, chunksize, printQueue, interrupt):
         self.session = session
         self.service = self.session.get_service('s3')
@@ -58,7 +58,7 @@ class BasicTask(object):
         self.parameters = parameters
         self.multi_threshold = multi_threshold
         self.multi_chunksize = chunksize
-        self.queue = queue
+        self.executer = executer
         self.printQueue = printQueue
         self.done = done
         self.interrupt = interrupt
@@ -76,12 +76,12 @@ class BasicTask(object):
             connect_error = str(e)
             LOGGER.debug("%s %s failure: %s" %
                          (filename.src, filename.operation, connect_error))
-            self.queue.put(copy.copy(self))
+            self.executer.submit(copy.copy(self))
         except MD5Error as e:
             retry = 1
             LOGGER.debug("%s %s failure: Data was corrupted" %
                          (filename.src, filename.operation))
-            self.queue.put(copy.copy(self))
+            self.executer.submit(copy.copy(self))
         except Exception as e:
             fail = 1
             error = str(e)
@@ -107,12 +107,12 @@ class UploadPartTask(object):
     complete the multipart upload initiated by the ``FileInfo``
     object.
     """
-    def __init__(self, session, queue, part_queue, dest_queue,
+    def __init__(self, session, executer, part_queue, dest_queue,
                  region, printQueue, interrupt, part_counter):
         self.session = session
         self.service = self.session.get_service('s3')
         self.endpoint = self.service.get_endpoint(region)
-        self.queue = queue
+        self.executer = executer
         self.part_queue = part_queue
         self.dest_queue = dest_queue
         self.printQueue = printQueue
@@ -165,12 +165,12 @@ class UploadPartTask(object):
                 LOGGER.debug("%s part upload failure: %s" %
                              (part_info[0].src, connect_error))
                 self.part_queue.put(part_info)
-                self.queue.put(copy.copy(self))
+                self.executer.submit(copy.copy(self))
             except MD5Error:
                 LOGGER.debug("%s part upload failure: Data"
                              "was corrupted" % part_info[0].src)
                 self.part_queue.put(part_info)
-                self.queue.put(copy.copy(self))
+                self.executer.submit(copy.copy(self))
             except Exception as e:
                 LOGGER.debug('%s' % str(e))
             self.part_queue.task_done()
@@ -179,7 +179,7 @@ class UploadPartTask(object):
                 pass
 
 
-class DownloadPartTask(threading.Thread):
+class DownloadPartTask(object):
     """
     This task downloads and writes a part to a file.  This task pulls
     from a ``part_queue`` which represents the queue for a specific
@@ -187,12 +187,12 @@ class DownloadPartTask(threading.Thread):
     in order to keep track and complete the multipart download initiated by
     the ``FileInfo`` object.
     """
-    def __init__(self, session, queue, part_queue, dest_queue,
+    def __init__(self, session, executer, part_queue, dest_queue,
                  f, region, printQueue, write_lock, part_counter):
         self.session = session
         self.service = self.session.get_service('s3')
         self.endpoint = self.service.get_endpoint(region)
-        self.queue = queue
+        self.executer = executer
         self.part_queue = part_queue
         self.dest_queue = dest_queue
         self.f = f
@@ -237,7 +237,7 @@ class DownloadPartTask(threading.Thread):
                 LOGGER.debug("%s part download failure: %s" %
                             (part_info[0].src, connect_error))
                 self.part_queue.put(part_info)
-                self.queue.put(self)
+                self.executer.submit(self)
             except Exception as e:
                 LOGGER.debug('%s' % str(e))
             self.part_queue.task_done()

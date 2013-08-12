@@ -234,18 +234,18 @@ class FileInfo(TaskInfo):
 
         # Required for multipart uploads and downloads.  Use ``set_multi``
         # function to set these.
-        self.queue = None
+        self.executer = None
         self.printQueue = None
         self.is_multi = False
         self.interrupt = None
         self.chunksize = None
 
-    def set_multi(self, queue, printQueue, interrupt, chunksize):
+    def set_multi(self, executer, printQueue, interrupt, chunksize):
         """
         This sets all of the necessary attributes to perform a multipart
         operation.
         """
-        self.queue = queue
+        self.executer = executer
         self.printQueue = printQueue
         self.is_multi = True
         self.interrupt = interrupt
@@ -333,8 +333,8 @@ class FileInfo(TaskInfo):
         Performs multipart uploads.  It initiates the multipart upload.
         It creates a queue ``part_queue`` which is directly responsible
         with controlling the progress of the multipart upload.  It then
-        creates ``UploadPartTasks`` for threads to run via the main queue
-        ``queue``.  This fucntion waits for all of the parts in the
+        creates ``UploadPartTasks`` for threads to run via the
+        ``executer``.  This fucntion waits for all of the parts in the
         multipart upload to finish, and then it completes the multipart
         upload.  This method waits on its parts to finish.  So, threads
         are required to process the parts for this function to complete.
@@ -354,14 +354,14 @@ class FileInfo(TaskInfo):
         for i in range(1, (num_uploads + 1)):
             part_info = (self, upload_id, i, size_uploads)
             part_queue.put(part_info)
-            task = UploadPartTask(session=self.session, queue=self.queue,
+            task = UploadPartTask(session=self.session, executer=self.executer,
                                   part_queue=part_queue,
                                   dest_queue=complete_upload_queue,
                                   region=self.region,
                                   printQueue=self.printQueue,
                                   interrupt=self.interrupt,
                                   part_counter=part_counter)
-            self.queue.put(task)
+            self.executer.submit(task)
         part_queue.join()
         # The following ensures that if the multipart upload is in progress,
         # all part uploads finish before aborting or completing.  This
@@ -391,7 +391,7 @@ class FileInfo(TaskInfo):
         s3 of particular object to a task.It creates a queue ``part_queue``
         which is directly responsible with controlling the progress of the
         multipart download.  It then creates ``DownloadPartTasks`` for
-        threads to run via the main queue ``queue``. This fucntion waits
+        threads to run via the ``executer``. This fucntion waits
         for all of the parts in the multipart download to finish, and then
         the last modification time is changed to the last modified time
         of the s3 object.  This method waits on its parts to finish.
@@ -415,14 +415,14 @@ class FileInfo(TaskInfo):
                 part = (self, i, size_uploads)
                 part_queue.put(part)
                 task = DownloadPartTask(session=self.session,
-                                        queue=self.queue,
+                                        executer=self.executer,
                                         part_queue=part_queue,
                                         dest_queue=dest_queue,
                                         f=f, region=self.region,
                                         printQueue=self.printQueue,
                                         write_lock=write_lock,
                                         part_counter=part_counter)
-                self.queue.put(task)
+                self.executer.submit(task)
             part_queue.join()
             # The following ensures that if the multipart download is
             # in progress, all part uploads finish before releasing the
