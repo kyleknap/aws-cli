@@ -78,24 +78,24 @@ cmd_dict = {'cp': {'options': {'nargs': 2},
             }
 
 cmd_dict['cp']['description'] = "Copies a local file or S3 object to another \
-                                location locally or in S3"
+                                location locally or in S3."
 cmd_dict['cp']['usage'] = "<LocalPath> <S3Path> or <S3Path> <LocalPath> " \
                           "or <S3Path> <S3Path>"
-cmd_dict['mv']['description'] = "Moves a local file or S3 object to" \
-                                "another location locally or in S3"
+cmd_dict['mv']['description'] = "Moves a local file or S3 object to " \
+                                "another location locally or in S3."
 cmd_dict['mv']['usage'] = "<LocalPath> <S3Path> or <S3Path> <LocalPath> " \
                           "or <S3Path> <S3Path>"
-cmd_dict['rm']['description'] = "Deletes an S3 object"
+cmd_dict['rm']['description'] = "Deletes an S3 object."
 cmd_dict['rm']['usage'] = "<S3Path>"
-cmd_dict['sync']['description'] = "Syncs directories and S3 prefixes"
+cmd_dict['sync']['description'] = "Syncs directories and S3 prefixes."
 cmd_dict['sync']['usage'] = "<LocalPath> <S3Path> or <S3Path> <LocalPath> " \
                             "or <S3Path> <S3Path>"
 cmd_dict['ls']['description'] = "List S3 objects and common prefixes " \
-                                "under a prefix or all S3 buckets"
+                                "under a prefix or all S3 buckets."
 cmd_dict['ls']['usage'] = "<S3Path> or NONE"
-cmd_dict['mb']['description'] = "Creates an S3 bucket"
+cmd_dict['mb']['description'] = "Creates an S3 bucket."
 cmd_dict['mb']['usage'] = "<S3Path>"
-cmd_dict['rb']['description'] = "Deletes an S3 bucket"
+cmd_dict['rb']['description'] = "Deletes an S3 bucket."
 cmd_dict['rb']['usage'] = "<S3Path>"
 
 """
@@ -328,7 +328,7 @@ class S3(object):
         self._session = session
         self.op_table = op_table
         self.documentation = "This provides higher level S3 commands for " \
-                             "AWS CLI"
+                             "the AWS CLI."
 
     def __call__(self, args, parsed_globals):
         """
