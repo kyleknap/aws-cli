@@ -308,11 +308,12 @@ class TestListFilesLocally(unittest.TestCase):
         open(p(self.directory, 'test321.txt'), 'w').close()
         os.mkdir(p(self.directory, 'test'))
         open(p(self.directory, 'test', 'foo.txt'), 'w').close()
-
         file_generator = FileGenerator(None, None, None)
         values = list(el[0] for el in file_generator.list_files(
             self.directory, dir_op=True))
-        self.assertEqual(values, list(sorted(values)))
+        ref_vals = list(sorted(values,
+                               key=lambda items: items.replace(os.sep, '/')))
+        self.assertEqual(values, ref_vals)
 
     def test_list_local_files_with_unicode_chars(self):
         p = os.path.join
