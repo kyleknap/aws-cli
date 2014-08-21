@@ -191,6 +191,13 @@ EXACT_TIMESTAMPS = {'name': 'exact-timestamps', 'action': 'store_true',
                         'same-sized items unless the local version is newer '
                         'than the S3 version.')}
 
+SKIP_EXISTING = {'name': 'skip-existing', 'action': 'store_true',
+                 'help_text': (
+                    'When syncing, only files that exist in the source '
+                    'but not in the destination are transfered. '
+                    'Last modified time and size have no affect on '
+                    'whether a file is transfered or not.')}
+
 INDEX_DOCUMENT = {'name': 'index-document',
                   'help_text': (
                       'A suffix that is appended to a request that is for '
@@ -212,7 +219,8 @@ TRANSFER_ARGS = [DRYRUN, QUIET, RECURSIVE, INCLUDE, EXCLUDE, ACL,
                  CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_ENCODING,
                  CONTENT_LANGUAGE, EXPIRES, SOURCE_REGION]
 
-SYNC_ARGS = [DELETE, EXACT_TIMESTAMPS, SIZE_ONLY] + TRANSFER_ARGS
+SYNC_ARGS = [DELETE, EXACT_TIMESTAMPS, SIZE_ONLY, SKIP_EXISTING] + \
+    TRANSFER_ARGS
 
 
 def get_endpoint(service, region, endpoint_url, verify):

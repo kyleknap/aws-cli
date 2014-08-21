@@ -604,6 +604,27 @@ class TestSync(BaseS3CLICommand):
         self.assertNotIn('delete:', p.stdout)
         self.assertEqual('', p.stdout)
 
+    def test_sync_skip_existing(self):
+        bucket_name = self.create_bucket()
+        self.files.create_file('foo.txt', 'foo contents')
+        file_path = os.path.join(self.files.rootdir, 'foo.txt')
+        p = aws('s3 sync %s s3://%s/' % (self.files.rootdir, bucket_name))
+        self.assert_no_errors(p)       
+        os.remove(file_path)
+        # Remake the file but make the contents different
+        self.files.create_file('foo.txt', 'foo different contents')
+        self.files.create_file('bar.txt', 'bar contents')
+        p = aws('s3 sync %s s3://%s/ --skip-existing' % 
+                (self.files.rootdir, bucket_name))
+        self.assert_no_errors(p)
+        self.assertTrue(
+            self.key_exists(bucket_name=bucket_name, key_name='bar.txt'))
+        # The new ``foo.txt`` file was not uploaded in the second sync.
+        self.assertEqual(
+            self.get_key_contents(bucket_name=bucket_name, key_name='foo.txt'),
+            'foo contents'
+        )
+
 
 class TestSourceRegion(BaseS3CLICommand):
     def extra_setup(self):

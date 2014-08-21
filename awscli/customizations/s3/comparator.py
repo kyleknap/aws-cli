@@ -42,6 +42,10 @@ class Comparator(object):
         if 'exact_timestamps' in params:
             self.match_exact_timestamps = params['exact_timestamps']
 
+        self.skip_existing = False
+        if 'skip_existing' in params:
+            self.skip_existing = params['skip_existing']
+
     def call(self, src_files, dest_files):
         """
         This function preforms the actual comparisons.  The parameters it takes
@@ -109,8 +113,9 @@ class Comparator(object):
                 if compare_keys == 'equal':
                     same_size = self.compare_size(src_file, dest_file)
                     same_last_modified_time = self.compare_time(src_file, dest_file)
-
-                    if self.compare_on_size_only:
+                    if self.skip_existing:
+                        should_sync = False
+                    elif self.compare_on_size_only:
                         should_sync = not same_size
                     else:
                         should_sync = (not same_size) or (not same_last_modified_time)

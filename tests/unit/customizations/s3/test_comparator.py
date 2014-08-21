@@ -420,5 +420,60 @@ class ComparatorExactTimestampsTest(unittest.TestCase):
         self.assertEqual(sum(1 for _ in files), 1)
 
 
+class ComparatorSkipExisting(unittest.TestCase):
+    def setUp(self):
+        self.comparator = Comparator({'delete': False, 'skip_existing': True})
+
+    def test_same_cmp_keys(self):
+        """
+        The compare keys are the same but the size differs. Note the
+        comparator does not pass any files to be transfered despite the
+        difference in size.
+        """
+        src_files = []
+        dest_files = []
+        ref_list = []
+        result_list = []
+        time = datetime.datetime.now()
+        src_file = FileStat(src='', dest='',
+                            compare_key='comparator_test.py', size=10,
+                            last_update=time, src_type='local',
+                            dest_type='s3', operation_name='upload')
+        dest_file = FileStat(src='', dest='',
+                             compare_key='comparator_test.py', size=11,
+                             last_update=time, src_type='s3',
+                             dest_type='local', operation_name='')
+        src_files.append(src_file)
+        dest_files.append(dest_file)
+        files = self.comparator.call(iter(src_files), iter(dest_files))
+        for filename in files:
+            result_list.append(filename)
+        self.assertEqual(len(result_list), 0)
+
+    def test_diff_cmp_keys(self):
+        """
+        Compare keys differ meaning the file is missing in the destination.
+        """
+        src_files = []
+        dest_files = []
+        ref_list = []
+        result_list = []
+        time = datetime.datetime.now()
+        src_file = FileStat(src='', dest='',
+                            compare_key='domparator_test.py', size=10,
+                            last_update=time, src_type='local',
+                            dest_type='s3', operation_name='upload')
+        dest_file = FileStat(src='', dest='',
+                             compare_key='comparator_test.py', size=11,
+                             last_update=time, src_type='s3',
+                             dest_type='local', operation_name='')
+        src_files.append(src_file)
+        dest_files.append(dest_file)
+        files = self.comparator.call(iter(src_files), iter(dest_files))
+        for filename in files:
+            result_list.append(filename)
+        self.assertEqual(result_list, [src_file])
+
+
 if __name__ == "__main__":
     unittest.main()
