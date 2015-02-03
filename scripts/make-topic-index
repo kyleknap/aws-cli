@@ -1,0 +1,16 @@
+#!/usr/bin/env python
+
+import awscli
+from awscli.topicparser import TopicTagParser
+
+
+def main():
+    topic_tag_parser = TopicTagParser()
+    src_files = topic_tag_parser.get_all_topic_src_files()
+    topic_tag_parser.scan(src_files)
+    topic_tag_parser.save_to_json_index()
+    #print(topic_tag_parser.transform(':category:'))
+
+
+if __name__ == '__main__':
+    main()

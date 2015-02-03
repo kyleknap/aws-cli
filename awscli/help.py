@@ -27,7 +27,11 @@ from bcdoc.textwriter import TextWriter
 from awscli.clidocs import ProviderDocumentEventHandler
 from awscli.clidocs import ServiceDocumentEventHandler
 from awscli.clidocs import OperationDocumentEventHandler
+from awscli.clidocs import TopicListerDocumentEventHandler
+from awscli.clidocs import TopicDocumentEventHandler
 from awscli.argprocess import ParamShorthand
+from awscli.argparser import ArgTableArgParser
+from awscli.topicparser import TopicTagParser
 
 
 LOG = logging.getLogger('awscli.help')
@@ -223,12 +227,15 @@ class HelpCommand(object):
         """
         pass
 
+    @property
+    def related_items(self):
+        pass
+
     def __call__(self, args, parsed_globals):
         # Create an event handler for a Provider Document
         instance = self.EventHandlerClass(self)
         # Now generate all of the events for a Provider document.
         # We pass ourselves along so that we can, in turn, get passed
-        # to all event handlers.
         bcdoc.docevents.generate_events(self.session, self)
         self.renderer.render(self.doc.getvalue())
         instance.unregister()
@@ -249,6 +256,11 @@ class ProviderHelpCommand(HelpCommand):
         self.description = description
         self.synopsis = synopsis
         self.help_usage = usage
+        self.topic_table = {}
+
+        self._topic_tag_parser = TopicTagParser()
+        self._topic_tag_parser.load_json_index()
+        self._create_topic_table()
 
     @property
     def event_class(self):
@@ -257,6 +269,29 @@ class ProviderHelpCommand(HelpCommand):
     @property
     def name(self):
         return self.obj.name
+
+    @property
+    def related_items(self):
+        return ['`The AWS CLI Topic Guide <../topics/index.html>`__'] 
+
+    def _create_topic_table(self):
+        topic_lister_command = TopicListerHelpCommand(
+            self.session, self._topic_tag_parser)
+        self.topic_table['topics'] = topic_lister_command
+        topic_names = self._topic_tag_parser.get_all_topic_names()
+        for topic_name in topic_names:
+            topic_help_command = TopicHelpCommand(self.session, topic_name,
+                self._topic_tag_parser)
+            self.topic_table[topic_name] = topic_help_command
+
+    def __call__(self, args, parsed_globals):
+        if args:
+            topic_parser = ArgTableArgParser({}, self.topic_table)
+            parsed_topic, remaining = topic_parser.parse_known_args(args)
+            self.topic_table[parsed_topic.subcommand].__call__(args,
+                parsed_globals)
+        else:
+            super(ProviderHelpCommand, self).__call__(args, parsed_globals)
 
 
 class ServiceHelpCommand(HelpCommand):
@@ -275,6 +310,7 @@ class ServiceHelpCommand(HelpCommand):
                                                  arg_table)
         self._name = name
         self._event_class = event_class
+        self._related_items = None
 
     @property
     def event_class(self):
@@ -283,6 +319,25 @@ class ServiceHelpCommand(HelpCommand):
     @property
     def name(self):
         return self._name
+
+    @property
+    def related_items(self):
+        if self._related_items is None:
+            related_items = []
+            topic_tag_parser = TopicTagParser()
+            topic_tag_parser.load_json_index()
+            topic_dict = topic_tag_parser.query(
+                ':service.operation', [self.name])
+            for topic in topic_dict.get(self.name, []):
+                topic_title = topic_tag_parser.get_tag_value(
+                    topic, ':title:')[0]
+                topic_listing = \
+                    'AWS CLI Topic: %s (`aws help %s <../../topics/%s.html>`_)'
+                topic_listing = topic_listing % (topic_title, topic, topic)
+                related_items.append(topic_listing)
+            sorted(related_items)
+            self._related_items = related_items
+        return self._related_items
 
 
 class OperationHelpCommand(HelpCommand):
@@ -301,6 +356,7 @@ class OperationHelpCommand(HelpCommand):
         self.param_shorthand = ParamShorthand()
         self._name = name
         self._event_class = event_class
+        self._related_items = None
 
     @property
     def event_class(self):
@@ -309,3 +365,145 @@ class OperationHelpCommand(HelpCommand):
     @property
     def name(self):
         return self._name
+
+    @property
+    def related_items(self):
+        if self._related_items is None:
+            related_items = []
+            topic_tag_parser = TopicTagParser()
+            topic_tag_parser.load_json_index()
+            topic_tag_value = '%s.%s' % (self.event_class, self._name)
+            topic_dict = topic_tag_parser.query(
+                ':service.operation', [topic_tag_value])
+            for topic in topic_dict.get(topic_tag_value, []):
+                topic_title = topic_tag_parser.get_tag_value(
+                    topic, ':title:')[0]
+                topic_listing = \
+                    'AWS CLI Topic: %s (`aws help %s <../../topics/%s.html>`_)'
+                topic_listing = topic_listing % (topic_title, topic, topic)
+                related_items.append(topic_listing)
+            sorted(related_items)
+            self._related_items = related_items
+        return self._related_items
+
+
+class TopicListerHelpCommand(HelpCommand):
+    EventHandlerClass = TopicListerDocumentEventHandler
+
+    DESCRIPTION = ('This is the AWS CLI Topic Guide. It gives access to a set '
+        'of topics that provide a deeper understanding of the CLI. To access '
+        'the list of topics from the command line, run ``aws help topics``. '
+        'To access a specific topic from the command line, run '
+        '``aws help [topicname]``, where ``topicname`` is the name of the '
+        'topic as it appears in the output from ``aws help topics``.')
+
+    def __init__(self, session, topic_tag_parser):
+        super(TopicListerHelpCommand, self).__init__(session, None, {}, {})
+        self._topic_tag_parser = topic_tag_parser
+        self._topic_categories = None
+        self._topic_descriptions = None
+
+    @property
+    def event_class(self):
+        return 'topics'
+
+    @property
+    def name(self):
+        return 'topics'
+
+    @property
+    def title(self):
+        return 'AWS CLI Topic Guide'
+
+    @property
+    def description(self):
+        return self.DESCRIPTION
+
+    @property
+    def related_items(self):
+        return ['`The AWS CLI Reference Guide <../reference/index.html>`__']
+
+    @property
+    def topic_categories(self):
+        if self._topic_categories is None:
+            self._topic_categories = self._topic_tag_parser.query(':category:')
+        return self._topic_categories
+
+    @property
+    def category_elements(self):
+        if self._topic_descriptions is None:
+            topic_description_template = '* <a href="%s.html">%s</a>: %s' 
+            topic_descriptions = {}
+            for topic_name in self._topic_tag_parser.get_all_topic_names():
+                sentence_description = self._topic_tag_parser.get_tag_value(
+                    topic_name, ':description:')[0]
+                full_description = topic_description_template % (
+                    topic_name, topic_name, sentence_description)
+                topic_descriptions[topic_name] = full_description
+            self._topic_descriptions = topic_descriptions
+        return self._topic_descriptions
+
+
+class TopicHelpCommand(HelpCommand):
+    EventHandlerClass = TopicDocumentEventHandler
+
+    def __init__(self, session, topic_name, topic_tag_parser):
+        super(TopicHelpCommand, self).__init__(session, None, {}, {})
+        self._topic_tag_parser = topic_tag_parser
+        self._topic_name = topic_name
+        self._contents = None
+        self._related_items = None
+
+    @property
+    def event_class(self):
+        return 'single-topic'
+
+    @property
+    def name(self):
+        return self._topic_name
+
+    @property
+    def title(self):
+        return self._topic_tag_parser.get_tag_value(self._topic_name,
+                                                    ':title:')[0]
+
+    @property
+    def related_items(self):
+        if self._related_items is None:
+            related_items = []
+            related_topics = self._topic_tag_parser.get_tag_value(
+                self._topic_name, ':related topic:', default_value=[])
+            for related_topic in related_topics:
+                topic_template = \
+                    'AWS CLI Topic: %s (`aws help %s <../topics/%s.html>`_)'
+                topic_title = self._topic_tag_parser.get_tag_value(
+                    related_topic, ':title:')[0]
+                filled_template = topic_template % \
+                    (topic_title, related_topic, related_topic)
+                related_items.append(filled_template)
+
+            service_operations = self._topic_tag_parser.get_tag_value(
+                self._topic_name, ':service.operation', default_value=[])
+            for service_operation in service_operations:
+                service_operation_components = service_operation.split('.')
+                service_operation_template = 'AWS CLI Reference: `aws '
+                service = service_operation_components[0]
+                if len(service_operation_components) == 1:
+                    service_operation_template += \
+                        '%s <../reference/%s/index.html>`_' % (service, service)
+                else:
+                    operation = service_operation_components[1]
+                    service_operation_template += \
+                        '%s %s <../reference/%s/%s.html>`_' % \
+                            (service, operation, service, operation)
+                related_items.append(service_operation_template)
+
+            self._related_items = sorted(related_items)
+        return self._related_items
+
+    @property
+    def contents(self):
+        if self._contents is None:
+            self._contents = self._topic_tag_parser.remove_tags_from_content(
+                self._topic_name)
+        return self._contents

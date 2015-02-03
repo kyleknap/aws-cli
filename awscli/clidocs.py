@@ -141,6 +141,16 @@ class CLIDocumentEventHandler(object):
         doc.style.dedent()
         doc.style.new_paragraph()
 
+    def doc_relateditems_start(self, help_command, **kwargs):
+        if help_command.related_items:
+            doc = help_command.doc
+            doc.style.h2('See Also')
+
+    def doc_relateditem(self, help_command, **kwargs):
+        if help_command.related_items:
+            doc = help_command.doc
+            for related_item in help_command.related_items:
+                doc.writeln('* ' + related_item)
 
 class ProviderDocumentEventHandler(CLIDocumentEventHandler):
 
@@ -183,6 +193,10 @@ class ProviderDocumentEventHandler(CLIDocumentEventHandler):
         file_name = '%s/index' % command_name
         doc.style.tocitem(command_name, file_name=file_name)
 
+    def doc_relateditems_start(self, help_command, **kwargs):
+        if help_command.related_items:
+            doc = help_command.doc
+            doc.style.h2('See Also')
 
 class ServiceDocumentEventHandler(CLIDocumentEventHandler):
 
@@ -480,3 +494,83 @@ class OperationDocumentEventHandler(CLIDocumentEventHandler):
             self._doc_member_for_output(doc, '', member_shape.member, stack)
         doc.style.dedent()
         doc.style.new_paragraph()
+
+
+class TopicListerDocumentEventHandler(CLIDocumentEventHandler):
+    def __init__(self, help_command):
+        self.help_command = help_command
+        self.register(help_command.session, help_command.event_class)
+        self.help_command.doc.translation_map = self.build_translation_map()
+
+    def doc_breadcrumbs(self, help_command, **kwargs):
+        doc = help_command.doc
+        if doc.target != 'man':
+           doc.write('[ ')
+           doc.style.ref('aws', '../reference/index')
+           doc.write(' ]')
+
+    def doc_title(self, help_command, **kwargs):
+        doc = help_command.doc
+        doc.style.h1(help_command.title)
+
+    def doc_description(self, help_command, **kwargs):
+        doc = help_command.doc
+        doc.style.h2('Description')
+        doc.include_doc_string(help_command.description)
+        doc.style.new_paragraph()
+
+    def doc_synopsis_start(self, help_command, **kwargs):
+        pass
+
+    def doc_synopsis_option(self, arg_name, help_command, **kwargs):
+        pass
+
+    def doc_synopsis_end(self, help_command, **kwargs):
+        pass
+
+    def doc_options_start(self, help_command, **kwargs):
+        pass
+
+    def doc_option(self, arg_name, help_command, **kwargs):
+        pass
+
+    def doc_option_example(self, arg_name, help_command, **kwargs):
+        pass
+
+    def doc_options_end(self, help_command, **kwargs):
+        pass
+
+    def doc_subitems_start(self, help_command, **kwargs):
+        doc = help_command.doc
+        doc.style.h2('Available Topics')
+
+        topic_categories = help_command.topic_categories
+        category_elements = help_command.category_elements
+        category_names = sorted(topic_categories.keys())
+        for category_name in category_names:
+            doc.style.h3(category_name)
+            doc.style.new_paragraph()
+            topic_categories[category_name].sort()
+            for topic_name in topic_categories[category_name]:
+                doc.include_doc_string(category_elements[topic_name])
+                doc.style.new_paragraph()
+
+class TopicDocumentEventHandler(TopicListerDocumentEventHandler):
+
+    def doc_breadcrumbs(self, help_command, **kwargs):
+        doc = help_command.doc
+        if doc.target != 'man':
+            doc.write('[ ')
+            doc.style.ref('aws', '../reference/index')
+            doc.write(' . ')
+            doc.style.ref('topics', 'index')
+            doc.write(' ]')
+
+    def doc_description(self, help_command, **kwargs):
+        doc = help_command.doc
+        doc.writeln(help_command.contents)
+        doc.style.new_paragraph()
+
+
+    def doc_subitems_start(self, help_command, **kwargs):
+        pass

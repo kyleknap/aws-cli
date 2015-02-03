@@ -14,6 +14,7 @@ from awscli.clidriver import CLICommand
 from awscli.arguments import CustomArgument, create_argument_model_from_schema
 from awscli.help import HelpCommand
 from awscli.schema import SchemaTransformer
+from awscli.topicparser import TopicTagParser
 
 
 LOG = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ class BasicCommand(CLICommand):
     # This is optional, if you are fine with the default synopsis
     # (the way all the built in operations are documented) then you
     # can leave this empty.
+    TOPIC_TAG = ''
     SYNOPSIS = ''
     # If you want to provide some hand written examples, you can do
     # so here.  This is written in RST format.  This is optional,
@@ -292,6 +294,7 @@ class BasicHelp(HelpCommand):
         self._description = command_object.DESCRIPTION
         self._synopsis = command_object.SYNOPSIS
         self._examples = command_object.EXAMPLES
+        self._related_items = None
 
     @property
     def name(self):
@@ -308,6 +311,28 @@ class BasicHelp(HelpCommand):
     @property
     def examples(self):
         return self._get_doc_contents('_examples')
+
+    @property
+    def related_items(self):
+        if self._related_items is None:
+            topic_tag = self.name
+            if self.obj.TOPIC_TAG:
+                topic_tag = self.obj.TOPIC_TAG
+            related_items = []
+            topic_tag_parser = TopicTagParser()
+            topic_tag_parser.load_json_index()
+            topic_dict = topic_tag_parser.query(
+                ':service.operation', [topic_tag])
+            for topic in topic_dict.get(topic_tag, []):
+                topic_title = topic_tag_parser.get_tag_value(
+                    topic, ':title:')[0]
+                topic_listing = \
+                    'AWS CLI Topic: %s (`aws help %s <../../topics/%s.html>`_)'
+                topic_listing = topic_listing % (topic_title, topic, topic)
+                related_items.append(topic_listing)
+            sorted(related_items)
+            self._related_items = related_items
+        return self._related_items
 
     def _get_doc_contents(self, attr_name):
         value = getattr(self, attr_name)
