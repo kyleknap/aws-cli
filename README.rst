@@ -12,7 +12,7 @@ aws-cli
 
 
 This package provides a unified command line interface to many
-Amazon Web Services. foo
+Amazon Web Services.
 
 The currently supported services include:
 
