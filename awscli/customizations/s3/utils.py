@@ -406,19 +406,39 @@ def uni_print(statement, out_file=None):
     out_file.flush()
 
 
-def bytes_print(statement):
+def bytes_print(statement, stdout=None):
     """
     This function is used to properly write bytes to standard out.
     """
+    if stdout is None:
+        stdout = sys.stdout
+
     if PY3:
-        if getattr(sys.stdout, 'buffer', None):
-            sys.stdout.buffer.write(statement)
+        if getattr(stdout, 'buffer', None):
+            stdout.buffer.write(statement)
         else:
             # If it is not possible to write to the standard out buffer.
             # The next best option is to decode and write to standard out.
-            sys.stdout.write(statement.decode('utf-8'))
+            stdout.write(statement.decode('utf-8'))
     else:
-        sys.stdout.write(statement)
+        stdout.write(statement)
+
+
+class StdoutBytesWriter(object):
+    """
+    This class acts as a file-like object that performs the bytes_print
+    function on write.
+    """
+    def __init__(self, stdout=None):
+        self._stdout = stdout
+
+    def write(self, b):
+        """
+        Writes data to stdout as bytes.
+
+        :param b: data to write
+        """
+        bytes_print(b, self._stdout)
 
 
 def guess_content_type(filename):

@@ -16,12 +16,17 @@ import math
 import os
 import sys
 
+from s3transfer.manager import TransferManager
+
 from awscli.customizations.s3.utils import (
     find_chunksize, adjust_chunksize_to_upload_limits, MAX_UPLOAD_SIZE,
     find_bucket_key, relative_path, PrintTask, create_warning)
 from awscli.customizations.s3.executor import Executor
 from awscli.customizations.s3 import tasks
-from awscli.customizations.s3.transferconfig import RuntimeConfig
+from awscli.customizations.s3.transferconfig import RuntimeConfig, \
+    create_transfer_config_from_runtime_config
+from awscli.customizations.s3.utils import RequestParamsMapper
+from awscli.customizations.s3.utils import StdoutBytesWriter
 from awscli.compat import six
 from awscli.compat import queue
 
@@ -32,27 +37,17 @@ CommandResult = namedtuple('CommandResult',
                            ['num_tasks_failed', 'num_tasks_warned'])
 
 
-class S3Handler(object):
-    """
-    This class sets up the process to perform the tasks sent to it.  It
-    sources the ``self.executor`` from which threads inside the
-    class pull tasks from to complete.
-    """
-    MAX_IO_QUEUE_SIZE = 20
-
+class BaseS3Handler(object):
     def __init__(self, session, params, result_queue=None,
                  runtime_config=None):
         self.session = session
         if runtime_config is None:
             runtime_config = RuntimeConfig.defaults()
         self._runtime_config = runtime_config
-        # The write_queue has potential for optimizations, so the constant
-        # for maxsize is scoped to this class (as opposed to constants.py)
-        # so we have the ability to change this value later.
-        self.write_queue = queue.Queue(maxsize=self.MAX_IO_QUEUE_SIZE)
         self.result_queue = result_queue
         if not self.result_queue:
             self.result_queue = queue.Queue()
+
         self.params = {
             'dryrun': False, 'quiet': False, 'acl': None,
             'guess_mime_type': True, 'sse_c_copy_source': None,
@@ -71,6 +66,24 @@ class S3Handler(object):
         for key in self.params.keys():
             if key in params:
                 self.params[key] = params[key]
+
+
+class S3Handler(BaseS3Handler):
+    """
+    This class sets up the process to perform the tasks sent to it.  It
+    sources the ``self.executor`` from which threads inside the
+    class pull tasks from to complete.
+    """
+    MAX_IO_QUEUE_SIZE = 20
+
+    def __init__(self, session, params, result_queue=None,
+                 runtime_config=None):
+        super(S3Handler, self).__init__(
+            session, params, result_queue, runtime_config)
+        # The write_queue has potential for optimizations, so the constant
+        # for maxsize is scoped to this class (as opposed to constants.py)
+        # so we have the ability to change this value later.
+        self.write_queue = queue.Queue(maxsize=self.MAX_IO_QUEUE_SIZE)
         self.multi_threshold = self._runtime_config['multipart_threshold']
         self.chunksize = self._runtime_config['multipart_chunksize']
         LOGGER.debug("Using a multipart threshold of %s and a part size of %s",
@@ -533,3 +546,130 @@ class S3StreamHandler(S3Handler):
         # many parts are being uploaded so it knows when it can quit.
         upload_context.announce_total_parts(num_uploads)
         return num_uploads
+
+
+class S3TransferStreamHandler(BaseS3Handler):
+    """
+    This class is an alternative ``S3Handler`` to be used when the operation
+    involves a stream since the logic is different when uploading and
+    downloading streams.
+    """
+    MAX_QUEUE_SIZE = 2
+    MAX_CONCURRENCY = 6
+
+    def __init__(self, session, params, result_queue=None,
+                 runtime_config=None):
+        if runtime_config is None:
+            # Rather than using the .defaults(), streaming
+            # has different default values so that it does not
+            # consume large amounts of memory.
+            runtime_config = RuntimeConfig().build_config(
+                max_queue_size=self.MAX_QUEUE_SIZE,
+                max_concurrent_requests=self.MAX_CONCURRENCY)
+        super(S3TransferStreamHandler, self).__init__(
+            session, params, result_queue, runtime_config)
+        self.config = create_transfer_config_from_runtime_config(
+            self._runtime_config)
+
+    def call(self, files, manager=None):
+        # There is only ever one file in a stream transfer.
+        file = files[0]
+        if manager is None:
+            manager = TransferManager(file.client, self.config)
+
+        if file.operation_name == 'upload':
+            bucket, key = find_bucket_key(file.dest)
+            return self._upload(manager, bucket, key)
+        elif file.operation_name == 'download':
+            bucket, key = find_bucket_key(file.src)
+            return self._download(manager, bucket, key)
+
+    def _download(self, manager, bucket, key):
+        """
+        Download the specified object and print it to stdout.
+
+        :type manager: s3transfer.manager.TransferManager
+        :param manager: The transfer manager to use for the download.
+
+        :type bucket: str
+        :param bucket: The bucket to download the object from.
+
+        :type key: str
+        :param key: The name of the key to download.
+
+        :return: A CommandResult representing the download status.
+        """
+        params = {}
+        RequestParamsMapper.map_get_object_params(params, self.params)
+
+        future = manager.download(
+            fileobj=StdoutBytesWriter(), bucket=bucket,
+            key=key, extra_args=params)
+
+        return self._process_transfer(future)
+
+    def _upload(self, manager, bucket, key):
+        """
+        Upload stdin using to the specified location.
+
+        :type manager: s3transfer.manager.TransferManager
+        :param manager: The transfer manager to use for the upload.
+
+        :type bucket: str
+        :param bucket: The bucket to upload the stream to.
+
+        :type key: str
+        :param key: The name of the key to upload the stream to.
+
+        :return: A CommandResult representing the upload status.
+        """
+        # Upload chunksizes are restricted, so we need to do some massaging
+        # to get them right.
+        if self.params['expected_size']:
+            # If we have the expected size, we can calculate an appropriate
+            # chunksize based on max parts and chunksize limits
+            chunksize = find_chunksize(
+                int(self.params['expected_size']),
+                self.config.multipart_chunksize)
+        else:
+            # Otherwise, we can still adjust for chunksize limits
+            chunksize = adjust_chunksize_to_upload_limits(
+                self.config.multipart_chunksize)
+        self.config.multipart_chunksize = chunksize
+
+        stream_filein = sys.stdin
+        if six.PY3:
+            # This is to get a binary stdin
+            stream_filein = sys.stdin.buffer
+
+        params = {}
+        RequestParamsMapper.map_put_object_params(params, self.params)
+
+        future = manager.upload(
+            fileobj=stream_filein, bucket=bucket,
+            key=key, extra_args=params)
+
+        # Set the size of the transfer if expected size is set.
+        expected_size = self.params.get('expected_size', None)
+        if expected_size is not None:
+            future.meta.size = expected_size
+
+        return self._process_transfer(future)
+
+    def _process_transfer(self, future):
+        """
+        Execute and process a transfer future.
+
+        :type future: s3transfer.futures.TransferFuture
+        :param future: A future representing an S3 Transfer
+
+        :return: A CommandResult representing the transfer status.
+        """
+        try:
+            future.result()
+            return CommandResult(0, 0)
+        except Exception as e:
+            LOGGER.debug('Exception caught during task execution: %s',
+                         str(e), exc_info=True)
+            self.result_queue.put(PrintTask(message=str(e), error=True))
+            return CommandResult(1, 0)

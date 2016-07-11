@@ -30,7 +30,8 @@ from awscli.customizations.s3.utils import (
     StablePriorityQueue, BucketLister, get_file_stat, AppendFilter,
     create_warning, human_readable_size, human_readable_to_bytes,
     MAX_SINGLE_UPLOAD_SIZE, MIN_UPLOAD_CHUNKSIZE, MAX_UPLOAD_SIZE,
-    set_file_utime, SetFileUtimeError, RequestParamsMapper, uni_print)
+    set_file_utime, SetFileUtimeError, RequestParamsMapper, uni_print,
+    StdoutBytesWriter)
 
 
 def test_human_readable_size():
@@ -523,3 +524,15 @@ class TestUniPrint(unittest.TestCase):
         # We replace the characters that can't be encoded
         # with '?'.
         self.assertEqual(buf.getvalue(), b'SomeChars??OtherChars')
+
+
+class TestBytesPrint(unittest.TestCase):
+    def setUp(self):
+        self.stdout = mock.Mock()
+        self.stdout.buffer = self.stdout
+
+    def test_stdout_wrapper(self):
+        wrapper = StdoutBytesWriter(self.stdout)
+        wrapper.write(b'foo')
+        self.assertTrue(self.stdout.write.called)
+        self.assertEqual(self.stdout.write.call_args[0][0], b'foo')

@@ -22,6 +22,7 @@ from awscli.testutils import unittest
 from awscli import EnvironmentVariables
 from awscli.compat import six
 from awscli.customizations.s3.s3handler import S3Handler, S3StreamHandler
+from awscli.customizations.s3.s3handler import S3TransferStreamHandler
 from awscli.customizations.s3.fileinfo import FileInfo
 from awscli.customizations.s3.tasks import CreateMultipartUploadTask, \
     UploadPartTask, CreateLocalFileTask, CompleteMultipartUploadTask
@@ -1087,6 +1088,126 @@ class TestStreams(S3HandlerBaseTest):
         submitted_tasks = s3handler.executor.submit.call_args_list
         self.assertNotEqual(type(submitted_tasks[0][0][0]),
                             CreateLocalFileTask)
+
+
+class TestS3TransferHandler(S3HandlerBaseTest):
+    def setUp(self):
+        super(TestS3TransferHandler, self).setUp()
+        self.params = {'is_stream': True, 'region': 'us-east-1'}
+        self.transfer_manager = mock.Mock()
+        self.transfer_future = mock.Mock()
+        self.transfer_manager.upload.return_value = self.transfer_future
+        self.transfer_manager.download.return_value = self.transfer_future
+
+        # This gets reset in S3HandlerBaseTest
+        awscli.customizations.s3.utils.MIN_UPLOAD_CHUNKSIZE = 5 * (1024 ** 2)
+
+    def test_upload_stream(self):
+        handler = S3TransferStreamHandler(self.session, self.params)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        with MockStdIn(b'foobar'):
+            response = handler.call([file], self.transfer_manager)
+
+        self.assertEqual(response.num_tasks_failed, 0)
+        self.assertEqual(response.num_tasks_warned, 0)
+
+        upload_args = self.transfer_manager.upload.call_args[1]
+        self.assertEqual(upload_args['bucket'], 'foo-bucket')
+        self.assertEqual(upload_args['key'], 'bar.txt')
+
+    def test_upload_stream_with_expected_size(self):
+        expected_size = 6
+        self.params['expected_size'] = expected_size
+        handler = S3TransferStreamHandler(self.session, self.params)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        with MockStdIn(b'foobar'):
+            handler.call([file], self.transfer_manager)
+
+        self.assertEqual(self.transfer_future.meta.size, expected_size)
+
+    def test_upload_modifies_chunksize_if_too_low(self):
+        config = runtime_config(multipart_chunksize=1)
+        handler = S3TransferStreamHandler(
+            self.session, self.params, runtime_config=config)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        with MockStdIn(b'foobar'):
+            handler.call([file], self.transfer_manager)
+
+        self.assertTrue(
+            handler.config.multipart_chunksize >= 5 * (1024 ** 2))
+
+    def test_upload_modifies_chunksize_if_too_high(self):
+        config = runtime_config(multipart_chunksize=6 * (1024 ** 3))
+        handler = S3TransferStreamHandler(
+            self.session, self.params, runtime_config=config)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        with MockStdIn(b'foobar'):
+            handler.call([file], self.transfer_manager)
+
+        self.assertTrue(
+            handler.config.multipart_chunksize <= 5 * (1024 ** 3))
+
+    def test_upload_modifies_chunksize_for_max_parts_if_size_known(self):
+        expected_size = 6 * (1024 ** 3)
+        self.params['expected_size'] = expected_size
+        config = runtime_config(multipart_chunksize=1)
+        handler = S3TransferStreamHandler(
+            self.session, self.params, runtime_config=config)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        with MockStdIn(b'foobar'):
+            handler.call([file], self.transfer_manager)
+
+        self.assertTrue(
+            handler.config.multipart_chunksize <= 5 * (1024 ** 3))
+        self.assertTrue(
+            handler.config.multipart_chunksize >= 5 * (1024 ** 2))
+
+    def test_upload_swallows_exceptions(self):
+        handler = S3TransferStreamHandler(self.session, self.params)
+        file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
+                        operation_name='upload')
+
+        self.transfer_future.result.side_effect = Exception()
+
+        with MockStdIn(b'foobar'):
+            response = handler.call([file], self.transfer_manager)
+
+        self.assertEqual(response.num_tasks_failed, 1)
+        self.assertEqual(response.num_tasks_warned, 0)
+
+    def test_download_stream(self):
+        handler = S3TransferStreamHandler(self.session, self.params)
+        file = FileInfo('foo-bucket/bar.txt', '-', is_stream=True,
+                        operation_name='download')
+
+        response = handler.call([file], self.transfer_manager)
+        self.assertEqual(response.num_tasks_failed, 0)
+        self.assertEqual(response.num_tasks_warned, 0)
+
+        download_args = self.transfer_manager.download.call_args[1]
+        self.assertEqual(download_args['bucket'], 'foo-bucket')
+        self.assertEqual(download_args['key'], 'bar.txt')
+
+    def test_download_swallows_exceptions(self):
+        handler = S3TransferStreamHandler(self.session, self.params)
+        file = FileInfo('foo-bucket/bar.txt', '-', is_stream=True,
+                        operation_name='download')
+
+        self.transfer_future.result.side_effect = Exception()
+
+        response = handler.call([file], self.transfer_manager)
+        self.assertEqual(response.num_tasks_failed, 1)
+        self.assertEqual(response.num_tasks_warned, 0)
 
 
 class TestS3HandlerInitialization(unittest.TestCase):
