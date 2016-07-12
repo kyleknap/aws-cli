@@ -27,6 +27,7 @@ from awscli.customizations.s3.transferconfig import RuntimeConfig, \
     create_transfer_config_from_runtime_config
 from awscli.customizations.s3.utils import RequestParamsMapper
 from awscli.customizations.s3.utils import StdoutBytesWriter
+from awscli.customizations.s3.utils import ProvideSizeSubscriber
 from awscli.compat import six
 from awscli.compat import queue
 
@@ -386,22 +387,17 @@ class S3TransferStreamHandler(BaseS3Handler):
     involves a stream since the logic is different when uploading and
     downloading streams.
     """
-    MAX_QUEUE_SIZE = 2
-    MAX_CONCURRENCY = 6
 
     def __init__(self, session, params, result_queue=None,
                  runtime_config=None):
-        if runtime_config is None:
-            # Rather than using the .defaults(), streaming
-            # has different default values so that it does not
-            # consume large amounts of memory.
-            runtime_config = RuntimeConfig().build_config(
-                max_queue_size=self.MAX_QUEUE_SIZE,
-                max_concurrent_requests=self.MAX_CONCURRENCY)
         super(S3TransferStreamHandler, self).__init__(
             session, params, result_queue, runtime_config)
         self.config = create_transfer_config_from_runtime_config(
             self._runtime_config)
+
+        # Restrict the maximum chunks to 1 per thread.
+        self.config.max_in_memory_upload_chunks = \
+            self.config.max_request_concurrency
 
     def call(self, files, manager=None):
         # There is only ever one file in a stream transfer.
@@ -455,15 +451,22 @@ class S3TransferStreamHandler(BaseS3Handler):
 
         :return: A CommandResult representing the upload status.
         """
-        # Upload chunksizes are restricted, so we need to do some massaging
-        # to get them right.
-        if self.params['expected_size']:
+        expected_size = self.params.get('expected_size', None)
+        subscribers = None
+        if expected_size is not None:
+            # `expected_size` comes in as a string
+            expected_size = int(expected_size)
+
+            # set the size of the transfer if we know it ahead of time.
+            subscribers = [ProvideSizeSubscriber(expected_size)]
+
+            # TODO: remove when this happens in s3transfer
             # If we have the expected size, we can calculate an appropriate
             # chunksize based on max parts and chunksize limits
             chunksize = find_chunksize(
-                int(self.params['expected_size']),
-                self.config.multipart_chunksize)
+                expected_size, self.config.multipart_chunksize)
         else:
+            # TODO: remove when this happens in s3transfer
             # Otherwise, we can still adjust for chunksize limits
             chunksize = adjust_chunksize_to_upload_limits(
                 self.config.multipart_chunksize)
@@ -479,12 +482,7 @@ class S3TransferStreamHandler(BaseS3Handler):
 
         future = manager.upload(
             fileobj=stream_filein, bucket=bucket,
-            key=key, extra_args=params)
-
-        # Set the size of the transfer if expected size is set.
-        expected_size = self.params.get('expected_size', None)
-        if expected_size is not None:
-            future.meta.size = expected_size
+            key=key, extra_args=params, subscribers=subscribers)
 
         return self._process_transfer(future)
 

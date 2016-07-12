@@ -16,6 +16,7 @@ import random
 import sys
 
 import mock
+from s3transfer.manager import TransferManager, TransferFuture
 
 import awscli.customizations.s3.utils
 from awscli.testutils import unittest
@@ -28,6 +29,7 @@ from awscli.customizations.s3.tasks import CreateMultipartUploadTask, \
     UploadPartTask, CreateLocalFileTask, CompleteMultipartUploadTask
 from awscli.customizations.s3.utils import MAX_PARTS, MAX_UPLOAD_SIZE
 from awscli.customizations.s3.utils import StablePriorityQueue
+from awscli.customizations.s3.utils import ProvideSizeSubscriber
 from awscli.customizations.s3.transferconfig import RuntimeConfig
 from tests.unit.customizations.s3 import make_loc_files, clean_loc_files, \
     MockStdIn, S3HandlerBaseTest
@@ -908,13 +910,26 @@ class TestS3TransferHandler(S3HandlerBaseTest):
     def setUp(self):
         super(TestS3TransferHandler, self).setUp()
         self.params = {'is_stream': True, 'region': 'us-east-1'}
-        self.transfer_manager = mock.Mock()
-        self.transfer_future = mock.Mock()
+        self.transfer_manager = mock.Mock(spec=TransferManager)
+        self.transfer_future = mock.Mock(spec=TransferFuture)
         self.transfer_manager.upload.return_value = self.transfer_future
         self.transfer_manager.download.return_value = self.transfer_future
 
         # This gets reset in S3HandlerBaseTest
         awscli.customizations.s3.utils.MIN_UPLOAD_CHUNKSIZE = 5 * (1024 ** 2)
+
+    def assert_chunk_size_in_range(self, size, maximum=None, minimum=None):
+        """
+        Asserts that a given chunksize is within the desired range, with the
+        default range being the allowable chunk size range for UploadPart.
+        """
+        if maximum is None:
+            maximum = awscli.customizations.s3.utils.MAX_SINGLE_UPLOAD_SIZE
+        if minimum is None:
+            minimum = awscli.customizations.s3.utils.MIN_UPLOAD_CHUNKSIZE
+
+        self.assertLessEqual(size, maximum)
+        self.assertGreaterEqual(size, minimum)
 
     def test_upload_stream(self):
         handler = S3TransferStreamHandler(self.session, self.params)
@@ -941,7 +956,17 @@ class TestS3TransferHandler(S3HandlerBaseTest):
         with MockStdIn(b'foobar'):
             handler.call([file], self.transfer_manager)
 
-        self.assertEqual(self.transfer_future.meta.size, expected_size)
+        # Assert that there is a subscriber.
+        call_args = self.transfer_manager.upload.call_args[1]
+        subscribers = call_args.get('subscribers', [])
+        self.assertTrue(len(subscribers) == 1)
+
+        # Make sure that subscriber is the right kind
+        subscriber = subscribers[0]
+        self.assertIsInstance(subscriber, ProvideSizeSubscriber)
+
+        # Validate that the size on the subscriber is the expected size
+        self.assertEqual(subscriber.size, expected_size)
 
     def test_upload_modifies_chunksize_if_too_low(self):
         config = runtime_config(multipart_chunksize=1)
@@ -953,8 +978,8 @@ class TestS3TransferHandler(S3HandlerBaseTest):
         with MockStdIn(b'foobar'):
             handler.call([file], self.transfer_manager)
 
-        self.assertTrue(
-            handler.config.multipart_chunksize >= 5 * (1024 ** 2))
+        chunksize = handler.config.multipart_chunksize
+        self.assert_chunk_size_in_range(chunksize)
 
     def test_upload_modifies_chunksize_if_too_high(self):
         config = runtime_config(multipart_chunksize=6 * (1024 ** 3))
@@ -966,13 +991,17 @@ class TestS3TransferHandler(S3HandlerBaseTest):
         with MockStdIn(b'foobar'):
             handler.call([file], self.transfer_manager)
 
-        self.assertTrue(
-            handler.config.multipart_chunksize <= 5 * (1024 ** 3))
+        chunksize = handler.config.multipart_chunksize
+        self.assert_chunk_size_in_range(chunksize)
 
     def test_upload_modifies_chunksize_for_max_parts_if_size_known(self):
         expected_size = 6 * (1024 ** 3)
+        max_parts = awscli.customizations.s3.utils.MAX_PARTS
+
+        # Set the chunksize to end up with way more than the max parts.
+        chunksize = int((expected_size / (max_parts * 2)) + 1)
         self.params['expected_size'] = expected_size
-        config = runtime_config(multipart_chunksize=1)
+        config = runtime_config(multipart_chunksize=chunksize)
         handler = S3TransferStreamHandler(
             self.session, self.params, runtime_config=config)
         file = FileInfo('-', 'foo-bucket/bar.txt', is_stream=True,
@@ -981,10 +1010,11 @@ class TestS3TransferHandler(S3HandlerBaseTest):
         with MockStdIn(b'foobar'):
             handler.call([file], self.transfer_manager)
 
-        self.assertTrue(
-            handler.config.multipart_chunksize <= 5 * (1024 ** 3))
-        self.assertTrue(
-            handler.config.multipart_chunksize >= 5 * (1024 ** 2))
+        # The chunksize should at least be large enough to fit within max parts
+        minimum_chunksize = int(expected_size / max_parts)
+        actual_chunksize = handler.config.multipart_chunksize
+        self.assert_chunk_size_in_range(
+            actual_chunksize, minimum=minimum_chunksize)
 
     def test_upload_swallows_exceptions(self):
         handler = S3TransferStreamHandler(self.session, self.params)

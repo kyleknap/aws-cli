@@ -25,6 +25,7 @@ from functools import partial
 from dateutil.parser import parse
 from dateutil.tz import tzlocal, tzutc
 from botocore.compat import unquote_str
+from s3transfer.subscribers import BaseSubscriber
 
 from awscli.compat import six
 from awscli.compat import PY3
@@ -764,3 +765,14 @@ class RequestParamsMapper(object):
                                                   cli_params):
         cls._set_sse_c_request_params(request_params, cli_params)
         cls._set_sse_c_copy_source_request_params(request_params, cli_params)
+
+
+class ProvideSizeSubscriber(BaseSubscriber):
+    """
+    A subscriber which provides the transfer size before it's queued.
+    """
+    def __init__(self, size):
+        self.size = size
+
+    def on_queued(self, future, **kwargs):
+        future.meta.provide_transfer_size(self.size)
