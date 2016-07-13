@@ -428,6 +428,8 @@ class S3TransferStreamHandler(BaseS3Handler):
         :return: A CommandResult representing the download status.
         """
         params = {}
+        # `download` performs the head_object as well, but the params are
+        # the same for both operations, so there's nothing missing here.
         RequestParamsMapper.map_get_object_params(params, self.params)
 
         future = manager.download(
