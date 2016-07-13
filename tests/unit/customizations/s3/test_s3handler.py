@@ -32,7 +32,8 @@ from awscli.customizations.s3.utils import StablePriorityQueue
 from awscli.customizations.s3.utils import ProvideSizeSubscriber
 from awscli.customizations.s3.transferconfig import RuntimeConfig
 from tests.unit.customizations.s3 import make_loc_files, clean_loc_files, \
-    MockStdIn, S3HandlerBaseTest
+    S3HandlerBaseTest
+from tests import MockStdIn
 
 
 def runtime_config(**kwargs):
