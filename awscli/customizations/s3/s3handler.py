@@ -387,6 +387,7 @@ class S3TransferStreamHandler(BaseS3Handler):
     involves a stream since the logic is different when uploading and
     downloading streams.
     """
+    MAX_IN_MEMORY_CHUNKS = 6
 
     def __init__(self, session, params, result_queue=None,
                  runtime_config=None):
@@ -397,7 +398,7 @@ class S3TransferStreamHandler(BaseS3Handler):
 
         # Restrict the maximum chunks to 1 per thread.
         self.config.max_in_memory_upload_chunks = \
-            self.config.max_request_concurrency
+            self.MAX_IN_MEMORY_CHUNKS
 
     def call(self, files, manager=None):
         # There is only ever one file in a stream transfer.
