@@ -38,6 +38,18 @@ CommandResult = namedtuple('CommandResult',
                            ['num_tasks_failed', 'num_tasks_warned'])
 
 
+class MockStdin(object):
+    def __init__(self):
+        self._max = 10 * (1024 ** 3)
+        self._amt_read = 0
+
+    def read(self, amt):
+        if self._amt_read >= self._max:
+            return b''
+        self._amt_read += amt
+        return b'a' * amt
+
+
 class BaseS3Handler(object):
     def __init__(self, session, params, result_queue=None,
                  runtime_config=None):
@@ -475,11 +487,11 @@ class S3TransferStreamHandler(BaseS3Handler):
                 self.config.multipart_chunksize)
         self.config.multipart_chunksize = chunksize
 
-        stream_filein = sys.stdin
-        if six.PY3:
-            # This is to get a binary stdin
-            stream_filein = sys.stdin.buffer
-
+        #stream_filein = sys.stdin
+        #if six.PY3:
+        #    # This is to get a binary stdin
+        #    stream_filein = sys.stdin.buffer
+        stream_file = MockStdin()
         params = {}
         RequestParamsMapper.map_put_object_params(params, self.params)
 
