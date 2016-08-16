@@ -10,34 +10,51 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
-from collections import namedtuple
+import errno
 import logging
 import math
 import os
-import sys
+import time
 
 from s3transfer.manager import TransferManager
+from s3transfer.subscribers import BaseSubscriber
 
-from awscli.customizations.s3.utils import (
-    find_chunksize, adjust_chunksize_to_upload_limits, MAX_UPLOAD_SIZE,
-    find_bucket_key, relative_path, PrintTask, create_warning,
-    NonSeekableStream)
-from awscli.customizations.s3.executor import Executor
-from awscli.customizations.s3 import tasks
-from awscli.customizations.s3.transferconfig import RuntimeConfig, \
-    create_transfer_config_from_runtime_config
-from awscli.customizations.s3.utils import RequestParamsMapper
-from awscli.customizations.s3.utils import StdoutBytesWriter
-from awscli.customizations.s3.utils import ProvideSizeSubscriber
-from awscli.customizations.s3.utils import uni_print
 from awscli.compat import queue
 from awscli.compat import binary_stdin
+from awscli.customizations.s3.utils import MAX_UPLOAD_SIZE
+from awscli.customizations.s3.utils import adjust_chunksize_to_upload_limits
+from awscli.customizations.s3.utils import uni_print
+from awscli.customizations.s3.utils import find_bucket_key
+from awscli.customizations.s3.utils import relative_path
+from awscli.customizations.s3.utils import set_file_utime
+from awscli.customizations.s3.utils import guess_content_type
+from awscli.customizations.s3.utils import find_chunksize
+from awscli.customizations.s3.utils import create_warning
+from awscli.customizations.s3.utils import PrintTask
+from awscli.customizations.s3.utils import RequestParamsMapper
+from awscli.customizations.s3.utils import ProvideSizeSubscriber
+from awscli.customizations.s3.utils import OnDoneFilteredSubscriber
+from awscli.customizations.s3.utils import StdoutBytesWriter
+from awscli.customizations.s3.utils import NonSeekableStream
+from awscli.customizations.s3.fileinfo import CreateDirectoryError
+from awscli.customizations.s3.executor import Executor
+from awscli.customizations.s3.executor import ShutdownThreadRequest
+from awscli.customizations.s3.transferconfig import RuntimeConfig
+from awscli.customizations.s3.transferconfig import \
+    create_transfer_config_from_runtime_config
+from awscli.customizations.s3.results import ErrorResult
+from awscli.customizations.s3.results import CommandResult
+from awscli.customizations.s3.results import UploadResultSubscriber
+from awscli.customizations.s3.results import DownloadResultSubscriber
+from awscli.customizations.s3.results import CopyResultSubscriber
+from awscli.customizations.s3.results import ResultRecorder
+from awscli.customizations.s3.results import ResultPrinter
+from awscli.customizations.s3.results import OnlyShowErrorsResultPrinter
+from awscli.customizations.s3.results import ResultProcessor
+from awscli.customizations.s3 import tasks
 
 
 LOGGER = logging.getLogger(__name__)
-
-CommandResult = namedtuple('CommandResult',
-                           ['num_tasks_failed', 'num_tasks_warned'])
 
 
 class BaseS3Handler(object):
@@ -513,3 +530,257 @@ class S3TransferStreamHandler(BaseS3Handler):
             # TODO: Update when S3Handler is refactored
             uni_print("Transfer failed: %s \n" % str(e))
             return CommandResult(1, 0)
+
+
+class S3TransferHandler(object):
+    def __init__(self, client, params, result_queue=None, runtime_config=None):
+        if runtime_config is None:
+            runtime_config = RuntimeConfig.defaults()
+        self._runtime_config = runtime_config
+
+        self._result_queue = result_queue
+        if not self._result_queue:
+            self._result_queue = queue.Queue()
+
+        self._config = create_transfer_config_from_runtime_config(
+            self._runtime_config)
+
+        LOGGER.debug(
+            "Using a multipart threshold of %s and a part size of %s",
+            self._config.multipart_threshold, self._config.multipart_chunksize
+        )
+
+        self._params = {
+            'dryrun': False, 'quiet': False, 'acl': None,
+            'guess_mime_type': True, 'sse_c_copy_source': None,
+            'sse_c_copy_source_key': None, 'sse': None,
+            'sse_c': None, 'sse_c_key': None, 'sse_kms_key_id': None,
+            'storage_class': None, 'website_redirect': None,
+            'content_type': None, 'cache_control': None,
+            'content_disposition': None, 'content_encoding': None,
+            'content_language': None, 'expires': None, 'grants': None,
+            'only_show_errors': False, 'is_stream': False,
+            'paths_type': None, 'expected_size': None, 'metadata': None,
+            'metadata_directive': None, 'ignore_glacier_warnings': False,
+            'force_glacier_transfer': False
+        }
+        self._params['region'] = params['region']
+        for key in self._params.keys():
+            if key in params:
+                self._params[key] = params[key]
+
+        self._result_subscribers = {
+            'upload': UploadResultSubscriber(self._result_queue),
+            'download': DownloadResultSubscriber(self._result_queue),
+            'copy': CopyResultSubscriber(self._result_queue),
+        }
+        self._warning_handlers = [
+            self._warn_if_too_large_upload,
+            self._warn_and_signal_if_skip_glacier,
+        ]
+        self._result_recorder = ResultRecorder()
+        self._result_printer = self._get_result_printer(self._result_recorder)
+        self._result_processor = ResultProcessor(
+            self._result_queue, self._result_recorder, self._result_printer)
+        self._client = client
+        self._transfer_manager = TransferManager(self._client, self._config)
+
+    def call(self, fileinfos):
+        self._result_processor.start()
+        try:
+            with self._transfer_manager:
+                self._enqueue(fileinfos)
+        except Exception as e:
+            LOGGER.debug('Exception caught during task execution: %s',
+                         str(e), exc_info=True)
+            self._result_queue.put(ErrorResult(message=str(e)))
+        finally:
+            self._shutdown()
+            return CommandResult(
+                self._result_recorder.files_failed +
+                self._result_recorder.errors,
+                self._result_recorder.files_warned
+            )
+
+    def _get_result_printer(self, result_recorder):
+        if self._params['quiet']:
+            return
+        elif self._params['only_show_errors']:
+            return OnlyShowErrorsResultPrinter(result_recorder)
+        return ResultPrinter(result_recorder)
+
+    def _shutdown(self):
+        self._result_queue.put(ShutdownThreadRequest())
+        self._result_processor.join()
+
+    def _enqueue(self, fileinfos):
+        for fileinfo in fileinfos:
+            should_skip = self._warn_and_signal_if_skip(fileinfo)
+            operation_name = fileinfo.operation_name
+            if not should_skip:
+                subscribers = [self._result_subscribers[operation_name]]
+                getattr(self, '_enqueue_' + operation_name)(
+                    fileinfo, subscribers)
+
+    def _warn_and_signal_if_skip(self, fileinfo):
+        for warning_handler in self._warning_handlers:
+            if warning_handler(fileinfo):
+                return True
+
+    def _warn_if_too_large_upload(self, fileinfo):
+        if hasattr(fileinfo, 'size'):
+            too_large = fileinfo.size > MAX_UPLOAD_SIZE
+        if too_large and fileinfo.operation_name == 'upload':
+            warning_message = "File exceeds s3 upload limit of 5 TB."
+            warning = create_warning(relative_path(fileinfo.src),
+                                     warning_message)
+            self._result_queue.put(warning)
+
+    def _warn_and_signal_if_skip_glacier(self, fileinfo):
+        if not self._params['force_glacier_transfer']:
+            if not fileinfo.is_glacier_compatible():
+                LOGGER.debug(
+                    'Encountered glacier object s3://%s. Not performing '
+                    '%s on object.' % (fileinfo.src, fileinfo.operation_name))
+                if not self._params['ignore_glacier_warnings']:
+                    warning = create_warning(
+                        's3://'+fileinfo.src,
+                        'Object is of storage class GLACIER. Unable to '
+                        'perform %s operations on GLACIER objects. You must '
+                        'restore the object to be able to the perform '
+                        'operation.' %
+                        fileinfo.operation_name
+                    )
+                    self._result_queue.put(warning)
+                return True
+        return False
+
+    def _enqueue_upload(self, fileinfo, subscribers):
+        extra_args = {}
+        bucket, key = find_bucket_key(fileinfo.dest)
+        RequestParamsMapper.map_put_object_params(extra_args, self._params)
+
+        filein = self._get_upload_filein_with_subscribers(
+            fileinfo, subscribers)
+
+        self._transfer_manager.upload(
+            fileobj=filein, bucket=bucket, key=key,
+            extra_args=extra_args, subscribers=subscribers
+        )
+
+    def _enqueue_download(self, fileinfo, subscribers):
+        extra_args = {}
+        bucket, key = find_bucket_key(fileinfo.src)
+        RequestParamsMapper.map_get_object_params(
+            extra_args, self._params)
+
+        subscribers.insert(0, ProvideSizeSubscriber(fileinfo.size))
+
+        fileout = self._get_download_fileout_with_subscribers(
+            fileinfo, subscribers)
+
+        self._transfer_manager.download(
+            bucket=bucket, key=key, fileobj=fileout,
+            extra_args=extra_args, subscribers=subscribers
+        )
+
+    def _enqueue_copy(self, fileinfo, subscribers):
+        extra_args = {}
+        bucket, key = find_bucket_key(fileinfo.dest)
+        source_bucket, source_key = find_bucket_key(fileinfo.src)
+        copy_source = {'Bucket': source_bucket, 'Key': source_key}
+        RequestParamsMapper.map_copy_object_params(
+            extra_args, self._params)
+
+        subscribers.insert(0, ProvideSizeSubscriber(fileinfo.size))
+        if self._should_inject_content_type():
+            subscribers.insert(0, ProvideCopyContentTypeSubscriber())
+
+        self._transfer_manager.copy(
+            bucket=bucket, key=key, copy_source=copy_source,
+            extra_args=extra_args, subscribers=subscribers,
+            source_client=fileinfo.source_client
+        )
+
+    def _should_inject_content_type(self):
+        return self._params['guess_mime_type'] and not self._params[
+            'content_type']
+
+    def _get_upload_filein_with_subscribers(self, fileinfo, subscribers):
+        subscribers.insert(0, ProvideSizeSubscriber(fileinfo.size))
+        if self._should_inject_content_type():
+            subscribers.insert(0, ProvideUploadContentTypeSubscriber())
+        return fileinfo.src
+
+    def _get_download_fileout_with_subscribers(self, fileinfo, subscribers):
+        subscribers.insert(0, DirectoryCreatorSubscriber())
+        subscribers.insert(
+            0, ProvideLastModifiedTimeSubscriber(
+                fileinfo.last_update, self._result_queue))
+        return fileinfo.dest
+
+
+class BaseProvideContentTypeSubscriber(BaseSubscriber):
+    def on_queued(self, future, **kwargs):
+        filename = self._get_filename(future)
+        try:
+            guessed_type = guess_content_type(filename)
+            if guessed_type is not None:
+                future.meta.call_args.extra_args['ContentType'] = guessed_type
+        # This catches a bug in the mimetype libary where some MIME types
+        # specifically on windows machines cause a UnicodeDecodeError
+        # because the MIME type in the Windows registery has an encoding
+        # that cannot be properly encoded using the default system encoding.
+        # https://bugs.python.org/issue9291
+        #
+        # So instead of hard failing, just log the issue and fall back to the
+        # default guessed content type of None.
+        except UnicodeDecodeError:
+            LOGGER.debug(
+                'Unable to guess content type for %s due to '
+                'UnicodeDecodeError: ', filename, exc_info=True
+            )
+
+    def _get_filename(self, future):
+        raise NotImplementedError('must implement _get_filename()')
+
+
+class ProvideUploadContentTypeSubscriber(BaseProvideContentTypeSubscriber):
+    def _get_filename(self, future):
+        return future.meta.call_args.fileobj
+
+
+class ProvideCopyContentTypeSubscriber(BaseProvideContentTypeSubscriber):
+    def _get_filename(self, future):
+        return future.meta.call_args.copy_source['Key']
+
+
+class ProvideLastModifiedTimeSubscriber(OnDoneFilteredSubscriber):
+    def __init__(self, last_modified_time, result_queue):
+        self._last_modified_time = last_modified_time
+        self._result_queue = result_queue
+
+    def on_success(self, future, **kwargs):
+        filename = future.meta.call_args.fileobj
+        try:
+            last_update_tuple = self._last_modified_time.timetuple()
+            mod_timestamp = time.mktime(last_update_tuple)
+            set_file_utime(filename, int(mod_timestamp))
+            print('here')
+        except Exception as e:
+            warning_message = (
+                'Successfully Downloaded %s but was unable to update the '
+                'last modified time. %s' % (filename, e))
+            self._result_queue.put(create_warning(filename, warning_message))
+
+
+class DirectoryCreatorSubscriber(BaseSubscriber):
+    def on_queued(self, future, **kwargs):
+        d = os.path.dirname(future.meta.call_args.fileobj)
+        try:
+            if not os.path.exists(d):
+                os.makedirs(d)
+        except OSError as e:
+            if not e.errno == errno.EEXIST:
+                raise CreateDirectoryError(
+                    "Could not create directory %s: %s" % (d, e))

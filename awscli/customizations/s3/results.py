@@ -23,6 +23,7 @@ from awscli.customizations.s3.utils import relative_path
 from awscli.customizations.s3.utils import human_readable_size
 from awscli.customizations.s3.utils import uni_print
 from awscli.customizations.s3.utils import WarningResult
+from awscli.customizations.s3.utils import OnDoneFilteredSubscriber
 
 
 LOGGER = logging.getLogger(__name__)
@@ -53,11 +54,13 @@ SuccessResult = _create_new_result_cls('SuccessResult')
 
 FailureResult = _create_new_result_cls('FailureResult', ['exception'])
 
+
+ErrorResult = namedtuple('ErrorResult', ['message'])
 CommandResult = namedtuple(
     'CommandResult', ['num_tasks_failed', 'num_tasks_warned'])
 
 
-class BaseResultSubscriber(BaseSubscriber):
+class BaseResultSubscriber(OnDoneFilteredSubscriber):
     TRANSFER_TYPE = None
 
     def __init__(self, result_queue):
@@ -80,15 +83,15 @@ class BaseResultSubscriber(BaseSubscriber):
             self.TRANSFER_TYPE, src, dest, bytes_transferred, future.meta.size)
         self._result_queue.put(progress_result)
 
-    def on_done(self, future, **kwargs):
+    def on_success(self, future):
         src, dest = self._get_src_dest(future)
-        try:
-            future.result()
-            self._result_queue.put(
-                SuccessResult(self.TRANSFER_TYPE, src, dest))
-        except Exception as e:
-            self._result_queue.put(
-                FailureResult(self.TRANSFER_TYPE, src, dest, e))
+        self._result_queue.put(
+            SuccessResult(self.TRANSFER_TYPE, src, dest))
+
+    def on_failure(self, future, e):
+        src, dest = self._get_src_dest(future)
+        self._result_queue.put(
+            FailureResult(self.TRANSFER_TYPE, src, dest, e))
 
     def _get_src_dest(self, future):
         raise NotImplementedError('_get_src_dest()')
@@ -149,6 +152,7 @@ class ResultRecorder(object):
         self.files_transferred = 0
         self.files_failed = 0
         self.files_warned = 0
+        self.errors = 0
         self.expected_bytes_transferred = 0
         self.expected_files_transferred = 0
 
@@ -162,6 +166,7 @@ class ResultRecorder(object):
             SuccessResult: self._record_success_result,
             FailureResult: self._record_failure_result,
             WarningResult: self._record_warning_result,
+            ErrorResult: self._record_error_result,
         }
 
     def record_result(self, result):
@@ -216,6 +221,9 @@ class ResultRecorder(object):
         self.files_failed += 1
         self.files_transferred += 1
 
+    def _record_error_result(self, **kwargs):
+        self.errors += 1
+
     def _record_warning_result(self, **kwargs):
         self.files_warned += 1
 
@@ -235,8 +243,7 @@ class ResultPrinter(object):
         'warning: {message}'
     )
 
-    def __init__(self, result_recorder, out_file=sys.stdout,
-                 error_file=sys.stderr):
+    def __init__(self, result_recorder, out_file=None, error_file=None):
         """Prints status of ongoing transfer
 
         :type result_recorder: ResultRecorder
@@ -254,13 +261,18 @@ class ResultPrinter(object):
         """
         self._result_recorder = result_recorder
         self._out_file = out_file
+        if self._out_file is None:
+            self._out_file = sys.stdout
         self._error_file = error_file
+        if self._error_file is None:
+            self._error_file = sys.stderr
         self._progress_length = 0
         self._result_handler_map = {
             ProgressResult: self._print_progress,
             SuccessResult: self._print_success,
             FailureResult: self._print_failure,
             WarningResult: self._print_warning,
+            ErrorResult: self._print_error,
         }
 
     def print_result(self, result):
@@ -287,6 +299,11 @@ class ResultPrinter(object):
         failure_statement = self._adjust_statement_padding(failure_statement)
         self._print_to_error_file(failure_statement)
         self._redisplay_progress()
+
+    def _print_error(self, result, **kwargs):
+        error_statement = result.message
+        error_statement = self._adjust_statement_padding(error_statement)
+        self._print_to_error_file(error_statement)
 
     def _print_warning(self, result, **kwargs):
         warning_statement = self.WARNING_FORMAT.format(message=result.message)

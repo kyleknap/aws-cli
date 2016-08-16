@@ -28,6 +28,7 @@ from awscli.customizations.s3.fileinfo import TaskInfo, FileInfo
 from awscli.customizations.s3.filters import create_filter
 from awscli.customizations.s3.s3handler import S3Handler
 from awscli.customizations.s3.s3handler import S3TransferStreamHandler
+from awscli.customizations.s3.s3handler import S3TransferHandler
 from awscli.customizations.s3.utils import find_bucket_key, uni_print, \
     AppendFilter, find_dest_path_comp_key, human_readable_size, \
     RequestParamsMapper
@@ -939,6 +940,7 @@ class CommandArchitecture(object):
                               result_queue=result_queue)
         s3_stream_handler = S3TransferStreamHandler(
             self.session, self.parameters, result_queue=result_queue)
+        s3_transfer_handler = self._get_s3_transfer_handler(result_queue)
 
         sync_strategies = self.choose_sync_strategies()
 
@@ -960,7 +962,7 @@ class CommandArchitecture(object):
                             'file_generator': [file_generator],
                             'filters': [create_filter(self.parameters)],
                             'file_info_builder': [file_info_builder],
-                            's3_handler': [s3handler]}
+                            's3_handler': [s3_transfer_handler]}
         elif self.cmd == 'rm':
             command_dict = {'setup': [files],
                             'file_generator': [file_generator],
@@ -1007,6 +1009,16 @@ class CommandArchitecture(object):
         if files[0].num_tasks_warned > 0:
             rc = 2
         return rc
+
+    def _get_s3_transfer_handler(self, result_queue):
+        if self.parameters.get('dryrun'):
+            return S3Handler(
+                self.session, self.parameters,
+                runtime_config=self._runtime_config,
+                result_queue=result_queue)
+        return S3TransferHandler(
+            self._client, self.parameters, result_queue=result_queue,
+                runtime_config=self._runtime_config)
 
 
 class CommandParameters(object):
