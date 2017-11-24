@@ -16,8 +16,11 @@ import datetime
 import contextlib
 import os
 import sys
+import subprocess
 
 from awscli.compat import six
+from awscli.compat import get_binary_stdout
+from awscli.compat import get_popen_kwargs_for_pager_cmd
 
 
 def split_on_commas(value):
@@ -155,3 +158,54 @@ def is_a_tty():
         return os.isatty(sys.stdout.fileno())
     except Exception as e:
         return False
+
+
+class OutputStreamFactory(object):
+    def __init__(self, popen=None):
+        self._popen = popen
+        if popen is None:
+            self._popen = subprocess.Popen
+
+    def get_output_stream(self, stream_type, preferred_pager=None):
+        """Get an output stream to write to
+
+        The value is wrapped in a context manager so make sure to use
+        a with statement.
+
+        :type stream_type: string
+        :param stream_type: The name of the stream to get. Valid values
+             consist of pager and stdout.
+
+        :type stream_type: string
+        :param stream_type: If no pager is provided through an environment
+            variable this is the pager we would prefer on non-windows
+            environments.
+        """
+        if stream_type == 'pager':
+            return self._get_pager_stream(preferred_pager)
+        elif stream_type == 'stdout':
+            return self._get_stdout_stream()
+        else:
+            raise ValueError(
+                'Stream type of %s is not supported' % stream_type)
+
+    @contextlib.contextmanager
+    def _get_pager_stream(self, preferred_pager):
+        popen_kwargs = self._get_process_pager_kwargs(preferred_pager)
+        try:
+            process = self._popen(**popen_kwargs)
+            yield process.stdin
+        finally:
+            process.communicate()
+
+    @contextlib.contextmanager
+    def _get_stdout_stream(self):
+        yield get_binary_stdout()
+
+    def _get_process_pager_kwargs(self, preferred_pager):
+        pager_cmd = os.environ.get('PAGER')
+        if preferred_pager is not None:
+            pager_cmd = preferred_pager
+        kwargs = get_popen_kwargs_for_pager_cmd(pager_cmd)
+        kwargs['stdin'] = subprocess.PIPE
+        return kwargs

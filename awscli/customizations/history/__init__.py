@@ -25,6 +25,7 @@ from awscli.customizations.history.db import DatabaseRecordWriter
 from awscli.customizations.history.db import RecordBuilder
 from awscli.customizations.history.db import DatabaseHistoryHandler
 from awscli.customizations.history.show import ShowCommand
+from awscli.customizations.history.list import ListCommand
 
 
 LOG = logging.getLogger(__name__)
@@ -87,7 +88,8 @@ class HistoryCommand(BasicCommand):
         '``$ aws configure set cli_history enabled``'
     )
     SUBCOMMANDS = [
-        {'name': 'show', 'command_class': ShowCommand}
+        {'name': 'show', 'command_class': ShowCommand},
+        {'name': 'list', 'command_class': ListCommand}
     ]
 
     def _run_main(self, parsed_args, parsed_globals):

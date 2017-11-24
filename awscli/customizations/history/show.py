@@ -10,11 +10,9 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
-import contextlib
+import os
 import datetime
 import json
-import os
-import subprocess
 import sys
 import xml.parsers.expat
 import xml.dom.minidom
@@ -23,9 +21,8 @@ import colorama
 
 from awscli.compat import six
 from awscli.compat import is_windows
-from awscli.compat import get_binary_stdout
-from awscli.compat import get_popen_kwargs_for_pager_cmd
 from awscli.utils import is_a_tty
+from awscli.utils import OutputStreamFactory
 from awscli.customizations.commands import BasicCommand
 from awscli.customizations.history.constants import HISTORY_FILENAME_ENV_VAR
 from awscli.customizations.history.constants import DEFAULT_HISTORY_FILENAME
@@ -326,50 +323,6 @@ class SectionValuePrettyFormatter(object):
             except json.decoder.JSONDecodeError:
                 return False
         return False
-
-
-class OutputStreamFactory(object):
-    def __init__(self, popen=None):
-        self._popen = popen
-        if popen is None:
-            self._popen = subprocess.Popen
-
-    def get_output_stream(self, stream_type):
-        """Get an output stream to write to
-
-        The value is wrapped in a context manager so make sure to use
-        a with statement.
-
-        :type stream_type: string
-        :param stream_type: The name of the stream to get. Valid values
-             consist of pager and stdout.
-        """
-        if stream_type == 'pager':
-            return self._get_pager_stream()
-        elif stream_type == 'stdout':
-            return self._get_stdout_stream()
-        else:
-            raise ValueError(
-                'Stream type of %s is not supported' % stream_type)
-
-    @contextlib.contextmanager
-    def _get_pager_stream(self):
-        popen_kwargs = self._get_process_pager_kwargs()
-        try:
-            process = self._popen(**popen_kwargs)
-            yield process.stdin
-        finally:
-            process.communicate()
-
-    @contextlib.contextmanager
-    def _get_stdout_stream(self):
-        yield get_binary_stdout()
-
-    def _get_process_pager_kwargs(self):
-        kwargs = get_popen_kwargs_for_pager_cmd(
-            os.environ.get('PAGER'))
-        kwargs['stdin'] = subprocess.PIPE
-        return kwargs
 
 
 class ShowCommand(BasicCommand):

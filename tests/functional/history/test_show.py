@@ -36,7 +36,7 @@ class TestShowCommand(BaseAWSCommandParamsTest):
         # get_binary_stdout is called because it returns sys.stdout.buffer
         # for Py3 and StringIO does not have a buffer
         self.binary_stdout_patch = mock.patch(
-            'awscli.customizations.history.show.get_binary_stdout')
+            'awscli.utils.get_binary_stdout')
         mock_get_binary_stdout = self.binary_stdout_patch.start()
         self.binary_stdout = BytesIO()
         mock_get_binary_stdout.return_value = self.binary_stdout
