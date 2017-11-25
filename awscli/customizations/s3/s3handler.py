@@ -178,8 +178,16 @@ class S3TransferHandler(object):
                             break
                 self._result_command_recorder.notify_total_submissions(
                     total_submissions)
+            self._dump_token_stats()
         return self._result_command_recorder.get_command_result()
 
+    def _dump_token_stats(self):
+        import json
+        filename = os.path.expanduser(
+            os.path.join('~', 'token-stats', 'stats.json'))
+        with open(filename, 'w') as f:
+            f.write(json.dumps(
+                self._transfer_manager.token_stats.token_consumption_stats))
 
 class BaseTransferRequestSubmitter(object):
     REQUEST_MAPPER_METHOD = None
