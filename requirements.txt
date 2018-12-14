@@ -3,7 +3,7 @@ docutils>=0.10
 # botocore and the awscli packages are typically developed
 # in tandem, so we're requiring the latest develop
 # branch of botocore when working on the awscli.
--e git://github.com/boto/botocore.git@develop#egg=botocore
+-e git://github.com/kyleknap/botocore.git@csm-develop#egg=botocore
 -e git://github.com/boto/s3transfer.git@develop#egg=s3transfer
 -e git://github.com/boto/jmespath.git@develop#egg=jmespath
 nose==1.3.7
