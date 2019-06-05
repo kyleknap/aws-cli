@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+import os
+import argparse
+import shutil
+import subprocess
+import tempfile
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+PYINSTALLER_DIR = os.path.join(ROOT_DIR, 'pyinstaller')
+
+
+def generate_exe(output_dir):
+    temp_dir = tempfile.mkdtemp()
+    output_dir = os.path.abspath(output_dir)
+    prexisting_executable = os.path.join(output_dir, 'aws')
+    if os.path.exists(prexisting_executable):
+        shutil.rmtree(prexisting_executable)
+    try:
+        _run_pyinstaller(temp_dir, output_dir)
+    finally:
+        shutil.rmtree(temp_dir)
+
+
+def _run_pyinstaller(work_dir, output_dir):
+    original = os.getcwd()
+    try:
+        os.chdir(PYINSTALLER_DIR)
+        subprocess.check_call(
+            ['pyinstaller', '--workpath', work_dir, '--distpath', output_dir,
+             'aws.spec']
+        )
+    finally:
+        os.chdir(original)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-o', '--output-dir', default='.', help=(
+            'The directory to save the built executable. By default it is '
+            'saved in the current working directory.'
+        )
+    )
+    parsed_args = parser.parse_args()
+    generate_exe(parsed_args.output_dir)
+
+
+if __name__ == '__main__':
+    main()
