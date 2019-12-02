@@ -10,17 +10,13 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
-import json
-import re
-import xml.parsers.expat
-import xml.dom.minidom
-
 import prompt_toolkit
 from prompt_toolkit.completion import WordCompleter
 
 from awscli.paramfile import get_paramfile, LOCAL_PREFIX_MAP
 from awscli.argprocess import ParamError
 from awscli.customizations.arguments import OverrideRequiredArgsArgument
+from awscli.customizations.utils import get_shape_doc_overview
 from awscli.customizations.wizard import selectmenu
 
 
@@ -90,11 +86,6 @@ class AutoPrompter(object):
     (e.g. AutoPromptArgument).
 
     """
-    _SENTENCE_DELIMETERS_REGEX = re.compile(r'[.:]+')
-    _LINE_BREAK_CHARS = [
-        '\n',
-        '\u2028'
-    ]
     _QUIT_SENTINEL = object()
 
     def __init__(self):
@@ -177,51 +168,5 @@ class AutoPrompter(object):
             print(' '.join(cli_command))
             return 0
 
-    def _get_doc_from_arg(self, doc):
-        first_sentence = self._get_comment_content_from_documentation(doc)
-        return '%s: %s' % (doc.name, first_sentence)
-
-    # TODO: Everything below is from generatecliskeleton.  See if we can share
-    # code.
-    def _get_comment_content_from_documentation(self, shape):
-        content = shape.documentation
-        content = self._strip_xml_from_documentation(content)
-        # In order to avoid having the comment content too dense, we limit
-        # the documentation to the first sentence.
-        content = self._get_first_sentence(content)
-        # There are characters that may mess up the indentation of the yaml
-        # by introducing new lines. We want to ignore those in comments.
-        content = self._remove_line_breaks(content)
-        return content
-
-    def _strip_xml_from_documentation(self, documentation):
-        try:
-            # We are surrounding the docstrings with our own tags in order
-            # to make sure the dom parser will look at all elements in the
-            # docstring as some docstrings may not have xml nodes that do
-            # not all belong to the same root node.
-            xml_doc = '<doc>%s</doc>' % documentation
-            xml_dom = xml.dom.minidom.parseString(xml_doc)
-        except xml.parsers.expat.ExpatError:
-            return documentation
-        content = []
-        self._strip_xml_from_child_nodes(xml_dom, content)
-        return ''.join(content)
-
-    def _strip_xml_from_child_nodes(self, node, content):
-        for child_node in node.childNodes:
-            if child_node.nodeType == node.TEXT_NODE:
-                content.append(child_node.data)
-            else:
-                self._strip_xml_from_child_nodes(child_node, content)
-
-    def _get_first_sentence(self, content):
-        content = self._SENTENCE_DELIMETERS_REGEX.split(content, 1)[0]
-        if content:
-            content += '.'
-        return content
-
-    def _remove_line_breaks(self, content):
-        for char in self._LINE_BREAK_CHARS:
-            content = content.replace(char, ' ')
-        return content
+    def _get_doc_from_arg(self, arg_shape):
+        return '%s: %s' % (arg_shape.name, get_shape_doc_overview(arg_shape))
