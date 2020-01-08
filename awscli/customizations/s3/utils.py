@@ -22,6 +22,7 @@ from collections import namedtuple, deque
 
 from dateutil.parser import parse
 from dateutil.tz import tzlocal, tzutc
+from botocore.utils import percent_encode_sequence
 from s3transfer.subscribers import BaseSubscriber
 
 from awscli.compat import bytes_print
@@ -717,6 +718,94 @@ class ProvideLastModifiedTimeSubscriber(OnDoneFilteredSubscriber):
                 'Successfully Downloaded %s but was unable to update the '
                 'last modified time. %s' % (filename, e))
             self._result_queue.put(create_warning(filename, warning_message))
+
+
+class SetMetadataFromHeadObjectSubscriber(BaseSubscriber):
+    _COPIED_HEAD_OBJECT_METADATA = [
+        'CacheControl',
+        'ContentDisposition',
+        'ContentEncoding',
+        'ContentLanguage',
+        'ContentType',
+        'Expires',
+        'Metadata',
+    ]
+
+    def __init__(self, client, cli_params, head_object_data=None):
+        self._client = client
+        self._cli_params = cli_params
+        self._head_object_data = head_object_data
+
+    def on_queued(self, future, **kwargs):
+        copy_source = future.meta.call_args.copy_source
+        head_object_params = {
+            'Bucket': copy_source['Bucket'],
+            'Key': copy_source['Key'],
+        }
+        RequestParamsMapper.map_head_object_params(
+            head_object_params, self._cli_params)
+        head_object_response = self._get_head_object_response(future)
+        self._inject_head_object_metadata(future, head_object_response)
+
+    def _get_head_object_response(self, future):
+        if self._head_object_data:
+            return self._head_object_data
+        copy_source = future.meta.call_args.copy_source
+        head_object_params = {
+            'Bucket': copy_source['Bucket'],
+            'Key': copy_source['Key'],
+        }
+        RequestParamsMapper.map_head_object_params(
+            head_object_params, self._cli_params)
+        return self._client.head_object(**head_object_params)
+
+    def _inject_head_object_metadata(self, future, head_object_response):
+        for param in self._COPIED_HEAD_OBJECT_METADATA:
+            if param in head_object_response:
+                future.meta.call_args.extra_args[
+                    param] = head_object_response[param]
+
+
+class SetTagsSubscriber(OnDoneFilteredSubscriber):
+    def __init__(self, client):
+        self._client = client
+
+    def on_queued(self, future, **kwargs):
+        bucket, key = self._get_bucket_key(future)
+        tags = self._get_tags(bucket, key)
+        if not tags:
+            return
+        header_value = self._serialize_to_header_value(tags)
+        if len(header_value.encode('utf-8')) <= 2 * 1024 * 1024:
+            future.meta.call_args.extra_args['Tagging'] = header_value
+        else:
+            future.meta.user_context['TagSet'] = tags
+
+    def _on_success(self, future):
+        if 'TagSet' in future.meta.user_context:
+            bucket, key = self._get_bucket_key(future)
+            self._client.put_object_tagging(
+                Bucket=bucket,
+                Key=key,
+                Tagging={
+                    'TagSet': future.meta.user_context['TagSet']
+                }
+            )
+
+    def _get_bucket_key(self, future):
+        copy_source = future.meta.call_args.copy_source
+        return copy_source['Bucket'], copy_source['Key']
+
+    def _get_tags(self, bucket, key):
+        get_tags_response = self._client.get_object_tagging(
+            Bucket=bucket, Key=key)
+        return get_tags_response['TagSet']
+
+    def _serialize_to_header_value(self, tags):
+        tags_dict = {
+            tag['Key']: tag['Value'] for tag in tags
+        }
+        return percent_encode_sequence(tags_dict)
 
 
 class DirectoryCreatorSubscriber(BaseSubscriber):

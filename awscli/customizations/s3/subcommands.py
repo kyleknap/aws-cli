@@ -347,6 +347,11 @@ METADATA_DIRECTIVE = {
         'specified metadata values.')
 }
 
+COPY_METADATA = {
+    'name': 'copy-metadata', 'choices': ['normal', 'legacy'],
+    'default': 'normal', 'help_text': ''
+}
+
 
 INDEX_DOCUMENT = {'name': 'index-document',
                   'help_text': (
@@ -728,7 +733,8 @@ class CpCommand(S3TransferCommand):
             "or <S3Uri> <S3Uri>"
     ARG_TABLE = [{'name': 'paths', 'nargs': 2, 'positional_arg': True,
                   'synopsis': USAGE}] + TRANSFER_ARGS + \
-                [METADATA, METADATA_DIRECTIVE, EXPECTED_SIZE, RECURSIVE]
+                [METADATA, METADATA_DIRECTIVE, EXPECTED_SIZE, COPY_METADATA,
+                 RECURSIVE]
 
 
 class MvCommand(S3TransferCommand):

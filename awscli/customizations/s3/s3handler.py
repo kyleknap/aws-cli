@@ -42,6 +42,8 @@ from awscli.customizations.s3.utils import ProvideSizeSubscriber
 from awscli.customizations.s3.utils import ProvideUploadContentTypeSubscriber
 from awscli.customizations.s3.utils import ProvideCopyContentTypeSubscriber
 from awscli.customizations.s3.utils import ProvideLastModifiedTimeSubscriber
+from awscli.customizations.s3.utils import SetMetadataFromHeadObjectSubscriber
+from awscli.customizations.s3.utils import SetTagsSubscriber
 from awscli.customizations.s3.utils import DirectoryCreatorSubscriber
 from awscli.customizations.s3.utils import DeleteSourceFileSubscriber
 from awscli.customizations.s3.utils import DeleteSourceObjectSubscriber
@@ -430,6 +432,23 @@ class CopyRequestSubmitter(BaseTransferRequestSubmitter):
         return fileinfo.operation_name == 'copy'
 
     def _add_additional_subscribers(self, subscribers, fileinfo):
+        if self._cli_params['copy_metadata'] == 'normal' and \
+                fileinfo.size >= self._transfer_manager._config.multipart_threshold:
+            metadata_subscriber_kwargs = {
+                'client': self._transfer_manager._client,
+                'cli_params': self._cli_params,
+            }
+            if not self._cli_params.get('dir_op'):
+                metadata_subscriber_kwargs[
+                    'head_object_data'] = fileinfo.associated_response_data
+            subscribers.append(
+                SetMetadataFromHeadObjectSubscriber(
+                    **metadata_subscriber_kwargs
+                )
+            )
+            subscribers.append(
+                SetTagsSubscriber(self._transfer_manager._client)
+            )
         subscribers.append(ProvideSizeSubscriber(fileinfo.size))
         if self._should_inject_content_type():
             subscribers.append(ProvideCopyContentTypeSubscriber())
