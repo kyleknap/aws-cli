@@ -771,28 +771,27 @@ class SetTagsSubscriber(OnDoneFilteredSubscriber):
         self._client = client
 
     def on_queued(self, future, **kwargs):
-        bucket, key = self._get_bucket_key(future)
+        bucket, key = self._get_bucket_key_from_copy_source(future)
         tags = self._get_tags(bucket, key)
         if not tags:
             return
         header_value = self._serialize_to_header_value(tags)
-        if len(header_value.encode('utf-8')) <= 2 * 1024 * 1024:
+        if len(header_value.encode('utf-8')) <= 2 * 1024:
             future.meta.call_args.extra_args['Tagging'] = header_value
         else:
             future.meta.user_context['TagSet'] = tags
 
     def _on_success(self, future):
         if 'TagSet' in future.meta.user_context:
-            bucket, key = self._get_bucket_key(future)
             self._client.put_object_tagging(
-                Bucket=bucket,
-                Key=key,
+                Bucket=future.meta.call_args.bucket,
+                Key=future.meta.call_args.key,
                 Tagging={
                     'TagSet': future.meta.user_context['TagSet']
                 }
             )
 
-    def _get_bucket_key(self, future):
+    def _get_bucket_key_from_copy_source(self, future):
         copy_source = future.meta.call_args.copy_source
         return copy_source['Bucket'], copy_source['Key']
 
