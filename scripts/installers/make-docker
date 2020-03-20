@@ -17,16 +17,16 @@ DOCKER_DIR = os.path.join(ROOT, 'docker')
 DIST_DIR = os.path.join(ROOT, 'dist')
 DEFAULT_EXE_ZIP = os.path.join(DIST_DIR, 'awscli-exe.zip')
 DEFAULT_DOCKER_OUTPUT = os.path.join(DIST_DIR, 'aws-cli-docker.tar')
-IMAGE_NAME = 'amazon/aws-cli'
+DEFAULT_TAGS = ['amazon/aws-cli']
 EXPECTED_DOCKERFILE_EXE_NAME = 'awscli-exe-linux-x86_64.zip'
 
 
-def make_docker(exe, output, image_name):
+def make_docker(exe, output, tags):
     _ensure_docker_is_available()
     with tmp_dir() as build_context:
         _make_build_context(build_context, exe)
-        _docker_build(build_context, image_name)
-    _docker_save(image_name, output)
+        _docker_build(build_context, tags)
+    _docker_save(tags, output)
 
 
 def _ensure_docker_is_available():
@@ -54,16 +54,19 @@ def _copy_exe_to_build_context(build_context_dir, exe):
     shutil.copy(exe, build_context_exe_path)
 
 
-def _docker_build(build_context_dir, image_name):
+def _docker_build(build_context_dir, tags):
     with cd(build_context_dir):
-        print(run(['docker', 'build', '.', '-t', image_name]))
+        docker_build_cmd = ['docker', 'build', '.']
+        for tag in tags:
+            docker_build_cmd.extend(['-t', tag])
+        print(run(docker_build_cmd))
 
 
-def _docker_save(image_name, output):
-    parent_dir = os.path.dirname(output)
+def _docker_save(tags, output):
+    parent_dir = os.path.dirname(os.path.abspath(output))
     if not os.path.exists(parent_dir):
         os.makedirs(parent_dir)
-    run(['docker', 'save', '--output', output, image_name])
+    run(['docker', 'save', '--output', output] + tags)
     print('Saved image at: %s' % output)
 
 
@@ -86,15 +89,17 @@ def main():
         )
     )
     parser.add_argument(
-        '--image-name',
-        default=IMAGE_NAME,
+        '--tags',
+        nargs='*',
+        default=DEFAULT_TAGS,
         help=(
-            'The name to give the image. By default, the image name will be '
-            'named: %s' % IMAGE_NAME
+            'The tags to give the image. This is the value provided to the '
+            '`-t` flag when running `docker build`. By default, the image '
+            'will have the tags: %s' % ''.join(DEFAULT_TAGS)
         ),
     )
     parsed_args = parser.parse_args()
-    make_docker(parsed_args.exe, parsed_args.output, parsed_args.image_name)
+    make_docker(parsed_args.exe, parsed_args.output, parsed_args.tags)
 
 
 if __name__ == "__main__":
