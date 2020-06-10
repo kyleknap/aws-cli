@@ -3,4 +3,4 @@ wheel==0.24.0
 ruamel.yaml>=0.15.0,<0.16.0
 -r requirements-test.txt
 -r requirements-build.txt
-https://github.com/boto/botocore/zipball/v2#egg=botocore
+https://github.com/kyleknap/botocore/zipball/bundle-crt#egg=botocore
