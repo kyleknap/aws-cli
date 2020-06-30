@@ -2,6 +2,12 @@
 CHANGELOG
 =========
 
+2.0.27
+======
+
+* enhancement:``s3``: Sample enhancement
+
+
 2.0.26
 ======
 
