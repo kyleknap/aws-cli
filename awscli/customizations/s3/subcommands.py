@@ -22,6 +22,9 @@ from awscli.compat import six
 from awscli.compat import queue
 from awscli.customizations.commands import BasicCommand
 from awscli.customizations.s3.comparator import Comparator
+from awscli.customizations.s3.factory import (
+    ClientFactory, TransferManagerFactory
+)
 from awscli.customizations.s3.fileinfobuilder import FileInfoBuilder
 from awscli.customizations.s3.fileformat import FileFormat
 from awscli.customizations.s3.filegenerator import FileGenerator
@@ -467,17 +470,13 @@ TRANSFER_ARGS = [DRYRUN, QUIET, INCLUDE, EXCLUDE, ACL,
                  REQUEST_PAYER]
 
 
-def get_client(session, region, endpoint_url, verify, config=None):
-    return session.create_client('s3', region_name=region,
-                                 endpoint_url=endpoint_url, verify=verify,
-                                 config=config)
-
-
 class S3Command(BasicCommand):
     def _run_main(self, parsed_args, parsed_globals):
-        self.client = get_client(self._session, parsed_globals.region,
-                                 parsed_globals.endpoint_url,
-                                 parsed_globals.verify_ssl)
+        self.client = ClientFactory(self._session).create_client(
+            region_name=parsed_globals.region,
+            endpoint_url=parsed_globals.endpoint_url,
+            verify=parsed_globals.verify_ssl,
+        )
 
 
 class ListCommand(S3Command):
@@ -708,32 +707,20 @@ class S3TransferCommand(S3Command):
     def _run_main(self, parsed_args, parsed_globals):
         super(S3TransferCommand, self)._run_main(parsed_args, parsed_globals)
         self._convert_path_args(parsed_args)
-        params = self._build_call_parameters(parsed_args, {})
-        cmd_params = CommandParameters(self.NAME, params,
-                                       self.USAGE)
-        cmd_params.add_region(parsed_globals)
-        cmd_params.add_endpoint_url(parsed_globals)
-        cmd_params.add_verify_ssl(parsed_globals)
-        cmd_params.add_page_size(parsed_args)
-        cmd_params.add_paths(parsed_args.paths)
-
-        runtime_config = transferconfig.RuntimeConfig().build_config(
-            **self._session.get_scoped_config().get('s3', {}))
-        cmd = CommandArchitecture(self._session, self.NAME,
-                                  cmd_params.parameters,
-                                  runtime_config)
-        cmd.set_clients()
+        cmd_params = self._get_cmd_params(parsed_args, parsed_globals)
+        source_client, transfer_client = self._get_source_and_transfer_clients(
+            params=cmd_params.parameters
+        )
+        transfer_manager = self._get_transfer_manager(
+            params=cmd_params.parameters,
+            botocore_transfer_client=transfer_client
+        )
+        cmd = CommandArchitecture(
+            self._session, self.NAME, cmd_params.parameters,
+            transfer_manager, source_client, transfer_client
+        )
         cmd.create_instructions()
         return cmd.run()
-
-    def _build_call_parameters(self, args, command_params):
-        """
-        This takes all of the commands in the name space and puts them
-        into a dictionary
-        """
-        for name, value in vars(args).items():
-            command_params[name] = value
-        return command_params
 
     def _convert_path_args(self, parsed_args):
         if not isinstance(parsed_args.paths, list):
@@ -745,6 +732,32 @@ class S3TransferCommand(S3Command):
                 enc_path = dec_path.encode('utf-8')
                 new_path = enc_path.decode('utf-8')
                 parsed_args.paths[i] = new_path
+
+    def _get_cmd_params(self, parsed_args, parsed_globals):
+        cmd_params = CommandParameters(
+            self.NAME, vars(parsed_args), self.USAGE)
+        cmd_params.add_region(parsed_globals)
+        cmd_params.add_endpoint_url(parsed_globals)
+        cmd_params.add_verify_ssl(parsed_globals)
+        cmd_params.add_page_size(parsed_args)
+        cmd_params.add_paths(parsed_args.paths)
+        return cmd_params
+
+    def _get_source_and_transfer_clients(self, params):
+        return ClientFactory(
+            self._session).create_source_and_transfer_clients(params)
+
+    def _get_transfer_manager(self, params, botocore_transfer_client):
+        runtime_config = self._get_runtime_config()
+        return TransferManagerFactory(self._session).create_transfer_manager(
+            params=params,
+            runtime_config=runtime_config,
+            botocore_client=botocore_transfer_client,
+        )
+
+    def _get_runtime_config(self):
+        return transferconfig.RuntimeConfig().build_config(
+            **self._session.get_scoped_config().get('s3', {}))
 
 
 class CpCommand(S3TransferCommand):
@@ -887,44 +900,15 @@ class CommandArchitecture(object):
     list of instructions to wire together an assortment of generators to
     perform the command.
     """
-    def __init__(self, session, cmd, parameters, runtime_config=None):
+    def __init__(self, session, cmd, parameters, transfer_manager,
+                 source_client, transfer_client):
         self.session = session
         self.cmd = cmd
         self.parameters = parameters
         self.instructions = []
-        self._runtime_config = runtime_config
-        self._endpoint = None
-        self._source_endpoint = None
-        self._client = None
-        self._source_client = None
-
-    def set_clients(self):
-        client_config = None
-        if self.parameters.get('sse') == 'aws:kms':
-            client_config = Config(signature_version='s3v4')
-        self._client = get_client(
-            self.session,
-            region=self.parameters['region'],
-            endpoint_url=self.parameters['endpoint_url'],
-            verify=self.parameters['verify_ssl'],
-            config=client_config
-        )
-        self._source_client = get_client(
-            self.session,
-            region=self.parameters['region'],
-            endpoint_url=self.parameters['endpoint_url'],
-            verify=self.parameters['verify_ssl'],
-            config=client_config
-        )
-        if self.parameters['source_region']:
-            if self.parameters['paths_type'] == 's3s3':
-                self._source_client = get_client(
-                    self.session,
-                    region=self.parameters['source_region'],
-                    endpoint_url=None,
-                    verify=self.parameters['verify_ssl'],
-                    config=client_config
-                )
+        self._transfer_manager = transfer_manager
+        self._client = source_client
+        self._source_client = transfer_client
 
     def create_instructions(self):
         """
@@ -1048,9 +1032,8 @@ class CommandArchitecture(object):
         file_info_builder = FileInfoBuilder(
             self._client, self._source_client, self.parameters)
 
-        s3_transfer_handler = S3TransferHandlerFactory(
-            self.parameters, self._runtime_config)(
-                self._client, result_queue)
+        s3_transfer_handler = S3TransferHandlerFactory(self.parameters)(
+            self._transfer_manager, result_queue)
 
         sync_strategies = self.choose_sync_strategies()
 

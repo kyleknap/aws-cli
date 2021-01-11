@@ -22,7 +22,9 @@ DEFAULTS = {
     'multipart_chunksize': 8 * (1024 ** 2),
     'max_concurrent_requests': 10,
     'max_queue_size': 1000,
-    'max_bandwidth': None
+    'max_bandwidth': None,
+    'preferred_transfer_client': 'default',
+    'crt_target_bandwidth': None,
 }
 
 
@@ -34,9 +36,12 @@ class RuntimeConfig(object):
 
     POSITIVE_INTEGERS = ['multipart_chunksize', 'multipart_threshold',
                          'max_concurrent_requests', 'max_queue_size',
-                         'max_bandwidth']
+                         'max_bandwidth', 'crt_target_bandwidth']
     HUMAN_READABLE_SIZES = ['multipart_chunksize', 'multipart_threshold']
-    HUMAN_READABLE_RATES = ['max_bandwidth']
+    HUMAN_READABLE_RATES = ['max_bandwidth', 'crt_target_bandwidth']
+    SUPPORTED_CHOICES = {
+        'preferred_transfer_client': ['default', 'crt']
+    }
 
     @staticmethod
     def defaults():
@@ -71,14 +76,24 @@ class RuntimeConfig(object):
         for attr in self.HUMAN_READABLE_RATES:
             value = runtime_config.get(attr)
             if value is not None and not isinstance(value, six.integer_types):
-                if not value.endswith('B/s'):
+                if value.endswith('B/s'):
+                    runtime_config[attr] = human_readable_to_bytes(value[:-2])
+                elif value.endswith('b/s'):
+                    bits_per_sec = human_readable_to_bytes(value[:-2])
+                    bytes_per_sec = bits_per_sec / 8
+                    runtime_config[attr] = bytes_per_sec
+                else:
                     raise InvalidConfigError(
                         'Invalid rate: %s. The value must be expressed '
-                        'as a rate in terms of bytes per seconds '
-                        '(e.g. 10MB/s or 800KB/s)' % value)
-                runtime_config[attr] = human_readable_to_bytes(value[:-2])
+                        'as a rate in terms of bytes per second '
+                        '(e.g. 10MB/s or 800KB/s) or bits per second '
+                        '(e.g. 10Mb/s or 800Kb/s)' % value)
 
     def _validate_config(self, runtime_config):
+        self._validate_positive_integers(runtime_config)
+        self._validate_choices(runtime_config)
+
+    def _validate_positive_integers(self, runtime_config):
         for attr in self.POSITIVE_INTEGERS:
             value = runtime_config.get(attr)
             if value is not None:
@@ -89,9 +104,22 @@ class RuntimeConfig(object):
                 except ValueError:
                     self._error_positive_value(attr, value)
 
+    def _validate_choices(self, runtime_config):
+        for attr in self.SUPPORTED_CHOICES:
+            value = runtime_config.get(attr)
+            if value is not None:
+                if value not in self.SUPPORTED_CHOICES[attr]:
+                    self._error_invalid_choice(attr, value)
+
     def _error_positive_value(self, name, value):
         raise InvalidConfigError(
             "Value for %s must be a positive integer: %s" % (name, value))
+
+    def _error_invalid_choice(self, name, value):
+        raise InvalidConfigError(
+            f'Invalid value: "{value}" for configuration option: "{name}". '
+            f'Supported values are: {", ".join(self.SUPPORTED_CHOICES[name])}'
+        )
 
 
 def create_transfer_config_from_runtime_config(runtime_config):

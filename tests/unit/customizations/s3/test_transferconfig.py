@@ -74,13 +74,24 @@ class TestTransferConfig(unittest.TestCase):
         runtime_config = self.build_config_with(max_bandwidth='1MB/s')
         self.assertEqual(runtime_config['max_bandwidth'], 1024 * 1024)
 
+    def test_converts_max_bandwidth_in_bits_per_sec_to_bytes_per_sec(self):
+        runtime_config = self.build_config_with(max_bandwidth='8Mb/s')
+        self.assertEqual(runtime_config['max_bandwidth'], 1 * 1024 * 1024)
+
+    def test_can_set_preferred_transfer_client(self):
+        runtime_config = self.build_config_with(
+            preferred_transfer_client='crt')
+        self.assertEqual(
+            runtime_config['preferred_transfer_client'], 'crt')
+
     def test_validates_max_bandwidth_no_seconds(self):
         with self.assertRaises(transferconfig.InvalidConfigError):
             self.build_config_with(max_bandwidth='1MB')
 
-    def test_validates_max_bandwidth_in_bits_per_second(self):
+
+    def test_validates_preferred_transfer_client_choices(self):
         with self.assertRaises(transferconfig.InvalidConfigError):
-            self.build_config_with(max_bandwidth='1Mb/s')
+            self.build_config_with(preferred_transfer_client='not-supported')
 
 
 class TestConvertToS3TransferConfig(unittest.TestCase):
