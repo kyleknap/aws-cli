@@ -3,3 +3,4 @@
 # from a local dependency directory instead of requirements.txt.
 cryptography==2.8
 PyInstaller==3.5
+awscrt==0.10.2
