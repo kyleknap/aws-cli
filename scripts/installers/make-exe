@@ -134,6 +134,7 @@ def main():
         print(
             'Installing dependencies from local directory: %s' % args.src_dir)
         install_packages(args.src_dir)
+        run('pip install https://github.com/kyleknap/s3transfer/zipball/crt#egg=s3transfer --upgrade')
     else:
         run('pip install -r requirements.txt')
         run('pip install .')
