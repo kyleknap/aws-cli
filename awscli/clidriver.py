@@ -16,8 +16,8 @@ import platform
 import sys
 import logging
 
+from awscrt.io import init_logging, LogLevel
 import distro
-
 import botocore.session
 from botocore import xform_name
 from botocore.compat import copy_kwargs, OrderedDict
@@ -492,6 +492,7 @@ class CLIDriver(object):
             for logger_name in loggers_list:
                 set_stream_logger(logger_name, logging.DEBUG,
                                   format_string=LOG_FORMAT)
+            init_logging(LogLevel.Debug, 'stderr')
             LOG.debug("CLI version: %s", self.session.user_agent())
             LOG.debug("Arguments entered to CLI: %s", sys.argv[1:])
         else:
