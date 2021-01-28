@@ -16,6 +16,7 @@ class TestWriteException(unittest.TestCase):
         shutil.rmtree(self.tempdir)
 
     def test_write_exception(self):
+        assert False
         error_message = "Some error message."
         ex = Exception(error_message)
         with codecs.open(self.outfile, 'w+', encoding='utf-8') as outfile:
